@@ -141,3 +141,59 @@ ATAU hapus/nonaktifkan resepnya di DBS_BOM → baris null hilang → bug ikut hi
   (bug tersembunyi, tidak terlihat di sheet ini).
 - **PIVOT HASIL SO (2)** — validasi 1.199/1.199 baris identik.
 - Semua sheet input & master — data sumber valid.
+
+---
+
+## LAMPIRAN 2 — VALIDASI v2: F_DEVIASI 18 KOLOM (PARITAS DOUBLE-CLICK)
+
+**Permintaan:** double-click (Show Details / drillthrough) pivot **CEK DEVIASI
+HARIAN** harus menampilkan kolom yang sama persis dengan file sampel, yaitu 18
+kolom (urutan sesuai pivot cache lama): `KATEGORI · NAMA BARANG · JENIS ·
+SATUAN · Attribute · SO_KEMARIN · WASTE · TRIAL · SUSUT · STOCK AWAL ·
+BARANG MASUK · BARANG KELUAR · BOM · Stock Seharusnya (SO_Kemarin + Barang
+Masuk - Barang Keluar - BOM) · SO · Value · Keterangan · Indikasi`.
+
+**Perubahan v2 (commit ini):** `F_Deviasi` ditulis ulang menjadi replika
+pipa hitung query lama `RFC_Rekap Mentah [CEK DEVIASI] Raw` (pivot JENIS →
+`SO_KEMARIN` via Table.Group per NAMA BARANG → 5 metrik → unpivot metrik →
+Keterangan/Indikasi) + dua penyesuaian: (1) filter `Attribute <> null`
+dipindah ke **awal** pipa (perbaikan bug hari-1 tetap dipertahankan),
+(2) langkah penutup `Table.ReorderColumns` eksplisit 18 kolom + pengetikan
+kolom (Attribute = Int64 supaya kolom pivot hari terurut numerik 1..31,
+sama seperti cache lama yang bertipe integer).
+
+**Metode validasi** (`so-surgery/updates/validate_fdeviasi.py`, ground truth =
+`pivotCacheDefinition1` + `pivotCacheRecords1` file sampel):
+
+| Pemeriksaan | Hasil |
+|---|---|
+| Urutan & nama 18 kolom kode M == cache1 | **IDENTIK** (18/18) |
+| Jumlah baris F_Deviasi baru | **15.810** (= cache 15.880 − 70 null) |
+| `JENIS` (label metrik) | hanya `1.DEVIASI … 5.LOSS/SURPLUS` |
+| `Attribute` | 1..31 semua integer, **0 null** |
+| Nilai 18 kolom + teks vs cache1 | **15.765 persis + 45 known-fix + 0 anomali** |
+| Baris ekstra / hilang | **0 / 0** |
+| known-fix hari-1 | 9 item sama persis validasi v1 (ADONAN GORENG MEKAR, BERAS PUTIH, CUP 16 - BAKSO, CUP SUNDAE - BAKSO, KULIT PANGSIT GORENG MEKAR, RICE WRAP, SENDOK TEH SUNDAE (V.030), SUNDAE LID - BAKSO, VANILLA SOFT MIX ICE MIX (V.20)) |
+
+Contoh before/after (sama dengan validasi v1):
+`ADONAN GORENG MEKAR` hari-1 1.DEVIASI: lama **+174.981** → baru **−11.512**
+(stok awal 186.493); `BERAS PUTIH`: +44.070 → **+9.270**; `RICE WRAP`: 0 → **−1.500**.
+
+**Struktur workbook pasca-v2:** `build_new_xlsx.py` dijalankan ulang terhadap
+`original.xlsx` — DataMashup berisi Section1.m baru (byte-exact), 44 koneksi ↔
+44 query sinkron, metadata PQ konsisten, 15 part pivot tetap bersih, sheet lain
+byte-identical. **53/53 pemeriksaan otomatis LULUS** (`so-surgery/validate.py`).
+
+**Dampak desain yang perlu diketahui:**
+1. `Table.Group` custom kembali ada di M (pembentuk SO_KEMARIN/Stock Seharusnya/
+   5 metrik) — konsekuensi agar 18 kolom melekat di baris untuk drillthrough.
+   `List.Generate` (running total AKUMULASI) TETAP hilang → 1 measure DAX
+   `[Akumulasi]`; pivot cache duplikat TETAP hilang.
+2. Measure generasi-1 (20 measure v1) obsolete — pivot CEK DEVIASI HARIAN kini
+   cukup `Sum of Value` (persis pivot sampel). Lihat `DAX-Measures.dax` v2.
+3. Drillthrough pivot AKUMULASI menampilkan kolom `Value` (nilai harian), bukan
+   kolom `AKUMULASI` seperti sampel — angka running total di sel pivot tetap
+   benar (dihitung measure). Selain itu 17 kolom lainnya identik.
+4. Excel membatasi jumlah baris drillthrough pada pivot Data Model (grand total
+   bisa terpotong); double-click sel spesifik (item × hari) selalu lengkap
+   (1–5 baris per sel daun).

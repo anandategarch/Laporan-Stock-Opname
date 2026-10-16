@@ -487,45 +487,260 @@ in
 
 shared F_Deviasi = let
     // =============================================================
-    // TABEL FAKTA UNTUK DATA MODEL (pivot CEK DEVIASI & AKUMULASI)
-    // Domain = sama persis query lama "RFC_Rekap Mentah [CEK DEVIASI]
-    // Raw" (JENIS<>REWORK, KATEGORI<>null, KATEGORI<>"MENU MIX"),
-    // ditambah buang baris Attribute=null (baris Value=0 hasil
-    // LeftOuter join BOM menu trial di fnBreakdownUnified).
-    // Semua PERHITUNGAN (SO_KEMARIN, STOK SEHARUSNYA, 5 metrik,
-    // running total, Keterangan, Indikasi) pindah ke measures DAX.
+    // TABEL FAKTA UNTUK DATA MODEL (pivot CEK DEVIASI & AKUMULASI).
+    // Skema 18 kolom = REPLIKA PERSIS output query lama "RFC_Rekap
+    // Mentah [CEK DEVIASI] Raw" (format hybrid: kolom lebar + baris
+    // per metrik), tujuannya agar DOUBLE-CLICK / Show Details pada
+    // pivot Data Model menampilkan baris & kolom yang sama persis
+    // dengan file sampel:
+    //   KATEGORI | NAMA BARANG | JENIS | SATUAN | Attribute |
+    //   SO_KEMARIN | WASTE | TRIAL | SUSUT | STOCK AWAL |
+    //   BARANG MASUK | BARANG KELUAR | BOM | Stock Seharusnya
+    //   (SO_Kemarin + Barang Masuk - Barang Keluar - BOM) | SO |
+    //   Value | Keterangan | Indikasi
+    // Domain = JENIS<>REWORK, KATEGORI<>null, KATEGORI<>"MENU MIX"
+    // (sama dengan query lama).
+    // PERBAIKAN disengaja vs file lama: baris Attribute=null dibuang
+    // SEBELUM dihitung (baris Value=0 hasil LeftOuter join BOM menu
+    // trial di fnBreakdownUnified) -> SO_KEMARIN hari-1 = STOCK AWAL,
+    // bukan 0 (bug lama pada 9 item terbetulkan - lihat
+    // LAPORAN-VALIDASI.md).
+    // Catatan desain: 5 metrik + Keterangan + Indikasi melekat
+    // sebagai KOLOM baris (syarat agar muncul saat double-click pivot
+    // Data Model / drillthrough). Konsekuensi: pivot CEK DEVIASI
+    // HARIAN TIDAK lagi butuh measure (persis pivot sampel: JENIS di
+    // Rows, Attribute di Columns, Sum of Value di Values), dan
+    // running total AKUMULASI cukup 1 measure DAX [Akumulasi].
+    // Query lama yang digantikan: "RFC_Rekap Mentah [CEK DEVIASI]
+    // Raw" + "RFC_Rekap Mentah [CEK DEVIASI] Akumulasi" + Raw
+    // Rekap Mentah [FINAL] PIVOT HASIL SO -> F_Deviasi / F_HasilSO.
     // Load: Only Create Connection + Add to Data Model.
     // =============================================================
     Source = #"Raw Rekap Mentah",
-    Filtered = Table.SelectRows(
+    #"Filtered Rows" = Table.SelectRows(
         Source,
         each [JENIS] <> "REWORK"
             and [KATEGORI] <> null
             and [KATEGORI] <> "MENU MIX"
             and [Attribute] <> null
     ),
-    Selected = Table.SelectColumns(
-        Filtered,
+    #"Removed Columns" = Table.RemoveColumns(
+        #"Filtered Rows",
+        {"SOURCE DATA", "KETERANGAN", "PENYEBAB TERJADINYA WASTE", "STATUS"}
+    ),
+    #"Pivoted Column" = Table.Pivot(
+        #"Removed Columns",
+        List.Distinct(#"Removed Columns"[JENIS]),
+        "JENIS",
+        "Value",
+        List.Sum
+    ),
+
+    GetVal = (r as record, fieldName as text) as number =>
+        let
+            v = Record.FieldOrDefault(r, fieldName, 0)
+        in
+            if v = null then 0 else v,
+
+    #"Stok Seharusnya" =
+        let
+            Grouped = Table.Group(
+                #"Pivoted Column",
+                {"NAMA BARANG"},
+                {
+                    {
+                        "Data",
+                        (t) =>
+                            let
+                                SortedT = Table.Sort(
+                                    t,
+                                    each try Number.From([Attribute]) otherwise [Attribute]
+                                ),
+                                BufferedT = Table.Buffer(SortedT),
+                                RowCount = Table.RowCount(BufferedT),
+
+                                GetListSafe = (col as text) as list =>
+                                    if Table.HasColumns(BufferedT, col)
+                                    then List.Transform(Table.Column(BufferedT, col), each if _ = null then 0 else _)
+                                    else List.Repeat({0}, RowCount),
+
+                                SOList = GetListSafe("SO"),
+                                AwalList = GetListSafe("STOCK AWAL"),
+                                MasukList = GetListSafe("BARANG MASUK"),
+                                KeluarList = GetListSafe("BARANG KELUAR"),
+                                BOMList = GetListSafe("BOM"),
+
+                                StockAwal1 = if List.IsEmpty(AwalList) then 0 else AwalList{0},
+                                SOKemarinList = List.FirstN({StockAwal1} & SOList, RowCount),
+
+                                StokList = List.Transform(
+                                    List.Numbers(0, RowCount),
+                                    each SOKemarinList{_} + MasukList{_} - KeluarList{_} - BOMList{_}
+                                ),
+
+                                Output = Table.FromColumns(
+                                    Table.ToColumns(BufferedT) & {SOKemarinList, StokList},
+                                    Table.ColumnNames(BufferedT) & {"SO_KEMARIN", "STOK_SEHARUSNYA"}
+                                )
+                            in
+                                Output
+                    }
+                }
+            ),
+
+            Result = Table.Combine(Grouped[Data])
+        in
+            Result,
+
+    #"Added 1.Deviasi" =
+        Table.AddColumn(
+            #"Stok Seharusnya",
+            "1.DEVIASI",
+            each GetVal(_, "SO") - [STOK_SEHARUSNYA],
+            type number
+        ),
+
+    #"Added 2.Waste" =
+        Table.AddColumn(
+            #"Added 1.Deviasi",
+            "2.WASTE",
+            each - Number.Abs(GetVal(_, "WASTE")),
+            type number
+        ),
+    #"Added 3.Susut" =
+        Table.AddColumn(
+            #"Added 2.Waste",
+            "3.SUSUT",
+            each - Number.Abs(GetVal(_, "SUSUT")),
+            type number
+        ),
+    #"Added 4.Trial" =
+        Table.AddColumn(
+            #"Added 3.Susut",
+            "4.TRIAL",
+            each - Number.Abs(GetVal(_, "TRIAL")),
+            type number
+        ),
+    #"Added 5.Loss/Surplus" =
+        Table.AddColumn(
+            #"Added 4.Trial",
+            "5.LOSS/SURPLUS",
+            each [1.DEVIASI] - [2.WASTE] - [3.SUSUT] - [4.TRIAL],
+            type number
+        ),
+    #"Renamed Columns" =
+        Table.RenameColumns(
+            #"Added 5.Loss/Surplus",
+            {
+                {"STOK_SEHARUSNYA", "Stock Seharusnya (SO_Kemarin + Barang Masuk - Barang Keluar - BOM)"}
+            },
+            MissingField.Ignore
+        ),
+    #"Replaced Value1" = Table.ReplaceValue(#"Renamed Columns", null, 0, Replacer.ReplaceValue, {"5.LOSS/SURPLUS"}),
+
+    MetricCols = List.Select(
+        Table.ColumnNames(#"Replaced Value1"),
+        each List.Contains({"1.DEVIASI", "2.WASTE", "3.SUSUT", "4.TRIAL", "5.LOSS/SURPLUS"}, _)
+    ),
+
+    #"Unpivoted Columns" = Table.Unpivot(#"Replaced Value1", MetricCols, "JENIS", "Value"),
+
+    #"Added Keterangan" = Table.AddColumn(
+        #"Unpivoted Columns",
+        "Keterangan",
+        each
+            if List.Contains({"1.DEVIASI", "5.LOSS/SURPLUS"}, [JENIS]) then
+                if [Value] < 0 then "SO lebih sedikit daripada perhitungan stock seharusnya"
+                else if [Value] > 0 then "SO lebih banyak daripada perhitungan stock seharusnya"
+                else "Stok Sesuai Perhitungan"
+            else "-",
+        type text
+    ),
+
+    #"Added Indikasi" = Table.AddColumn(
+        #"Added Keterangan",
+        "Indikasi",
+        each
+            if not List.Contains({"1.DEVIASI", "5.LOSS/SURPLUS"}, [JENIS]) then "-"
+            else
+                let
+                    val = [Value],
+                    soNow = GetVal(_, "SO"),
+                    soPrev = GetVal(_, "SO_KEMARIN"),
+                    masuk = GetVal(_, "BARANG MASUK"),
+                    keluar = GetVal(_, "BARANG KELUAR"),
+                    bom = GetVal(_, "BOM")
+                in
+                    if soNow > soPrev and masuk = 0 then
+                        "Barang Masuk belum tercatat (Stok SO naik tapi Barang Masuk = 0)"
+                    else if soNow = soPrev and bom > 0 and masuk = 0 then
+                        "Stok SO tidak berkurang meski ada penjualan/BOM"
+                    else if soNow < soPrev and keluar = 0 and bom = 0 then
+                        "FIX: Barang Keluar / BOM belum tercatat (Stok SO turun tapi pemakaian di sistem = 0)"
+                    else if val > 0 then
+                        "1. Barang Masuk belum tercatat | 2. Under Takaran | 3. Salah catat Barang Keluar"
+                    else if val < 0 then
+                        "1. Barang Keluar belum tercatat (Kiriman/retur ke resto lain/DC) | 2. Pencatatan Promix 00 kurang tepat | 3. Loss karna Waste/Susut atau Over Takaran"
+                    else
+                        "-",
+        type text
+    ),
+
+    // Urutan kolom PERSIS pivot cache lama (ground truth cacheDefinition1):
+    // double-click pivot Data Model menampilkan kolom sesuai urutan ini.
+    #"Reordered Columns" = Table.ReorderColumns(
+        #"Added Indikasi",
         {
             "KATEGORI",
             "NAMA BARANG",
             "JENIS",
             "SATUAN",
             "Attribute",
-            "Value"
+            "SO_KEMARIN",
+            "WASTE",
+            "TRIAL",
+            "SUSUT",
+            "STOCK AWAL",
+            "BARANG MASUK",
+            "BARANG KELUAR",
+            "BOM",
+            "Stock Seharusnya (SO_Kemarin + Barang Masuk - Barang Keluar - BOM)",
+            "SO",
+            "Value",
+            "Keterangan",
+            "Indikasi"
         },
         MissingField.Ignore
     ),
+    // Tipe kolom utk Data Model (Attribute = integer -> kolom pivot
+    // hari 1..31 terurut numerik, sama seperti sampel). Kolom lebar
+    // dari Table.Pivot hanya dikonversi jika kolomnya ada (tahan
+    // terhadap bulan tanpa data salah satu JENIS).
     Typed = Table.TransformColumnTypes(
-        Selected,
-        {
-            {"KATEGORI", type text},
-            {"NAMA BARANG", type text},
-            {"JENIS", type text},
-            {"SATUAN", type text},
-            {"Attribute", Int64.Type},
-            {"Value", type number}
-        }
+        #"Reordered Columns",
+        List.Select(
+            {
+                {"KATEGORI", type text},
+                {"NAMA BARANG", type text},
+                {"JENIS", type text},
+                {"SATUAN", type text},
+                {"Attribute", Int64.Type},
+                {"SO_KEMARIN", type number},
+                {"WASTE", type number},
+                {"TRIAL", type number},
+                {"SUSUT", type number},
+                {"STOCK AWAL", type number},
+                {"BARANG MASUK", type number},
+                {"BARANG KELUAR", type number},
+                {"BOM", type number},
+                {"Stock Seharusnya (SO_Kemarin + Barang Masuk - Barang Keluar - BOM)", type number},
+                {"SO", type number},
+                {"Value", type number},
+                {"Keterangan", type text},
+                {"Indikasi", type text}
+            },
+            each Table.HasColumns(#"Reordered Columns", {_{0}})
+        )
     )
 in
     Typed;
