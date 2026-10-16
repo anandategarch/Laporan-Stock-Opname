@@ -85,3 +85,59 @@ Perhitungan benar: `deviasi = SO − (stok awal + masuk − keluar − BOM)`
 **Migrasi aman dijalankan mengikuti `PANDUAN-MIGRASI.md`.**
 Angka identik 100% dengan sistem lama, KECUALI koreksi bug hari-1 pada 9 item
 yang terdokumentasi di atas. Tidak ada anomali tak terjelaskan.
+
+---
+
+## LAMPIRAN — CARA CEK BUG LAMA SECARA MANDIRI (di file sampel)
+
+Semua angka di bawah adalah **isi asli workbook** (cache pivot hasil refresh terakhir),
+bukan hasil sistem baru. Alamat sel merujuk file `Sampel_Laporan SO_Full Power Query.xlsx`.
+
+### Lokasi & angka kunci
+
+| # | Sheet | Lokasi | Tertulis (bug) | Seharusnya |
+|---|-------|--------|----------------:|-----------:|
+| 1 | CEK DEVIASI HARIAN | kolom paling kanan berjudul **"(blank)"** | kolom ekstra tak semestinya ada | — |
+| 2 | CEK DEVIASI HARIAN | **E441** = ADONAN GORENG MEKAR / 1.DEVIASI / hari 1 | 174.981 | **−11.512** |
+| 3 | CEK DEVIASI HARIAN | **E483** = KULIT PANGSIT GORENG MEKAR / hari 1 | 290.830 | **−16.895** |
+| 4 | CEK DEVIASI HARIAN | **E273** = BERAS PUTIH / hari 1 | 44.070 | **9.270** |
+| 5 | CEK DEVIASI HARIAN | baris 3 = SENDOK TEH SUNDAE (V.030) / hari 1 | 15.572 | **32** |
+| 6 | AKUMULASI DEVIASI ATAU TOTAL | baris 441, kolom E→AI | 174.981 → 23.494,5 | −11.512 → **−162.998,5** |
+| 7 | AKUMULASI DEVIASI ATAU TOTAL | baris 483, kolom E→AI | 290.830 → −169.515 | −16.895 → **−477.240** |
+| 8 | STOK AWAL | **C2** | 186.493 | (input — benar) |
+| 9 | REKAP MENTAH | baris ADONAN GORENG MEKAR (±I615) | STOCK AWAL h-1=186.493, BOM=38.918, SO=136.063 | (sumber — benar) |
+
+### Hitungan cek (ADONAN GORENG MEKAR, hari 1)
+
+```
+1.DEVIASI = SO − (STOK AWAL + MASUK − KELUAR − BOM)
+          = 136.063 − (186.493 + 0 − 0 − 38.918) = −11.512
+```
+Sel E441 tertulis **174.981** (= 136.063 + 38.918 — stok awal hilang dari hitungan) → bug.
+
+**Bukti kontradiksi internal:** dobel-klik sel E441 (drill-down) → baris detail
+menampilkan `STOCK AWAL = 186.493` **dan** `SO_KEMARIN = 0` pada baris yang sama.
+(Contoh drill-down lama sudah ada di sheet `Detail1`.)
+
+### Akar data (input kamu TIDAK salah — salah di query turunan)
+
+5 menu terdaftar di DBS_BOM tapi tidak punya baris di 4 sheet input menu
+(INPUT PENJUALAN 00 / INPUT PROMIX 04 / WASTE PORSI CANCELNOTA / WASTE DINE IN
+KARNA HANDLING; GORENG MEKAR 1 PCS hanya ada di TRIAL PORSI) — resep bahan mereka
+menghasilkan baris null via LeftOuter join:
+
+`CARAMEL POPCORN SUNDAE` · `CUP - BAKSO` (tak terdaftar di DBS_MENU) ·
+`GORENG MEKAR 1 PCS` (Grup 07.TRIAL) · `NASI` · `STRAWBERRY FRANZZI SUNDAE`
+→ 13 bahan null; + `UDANG KEJU FROZEN` (jalur lookup trial, dampak 0).
+
+Solusi tanpa migrasi: tambahkan baris menu tersebut ke sheet input menu terkait,
+ATAU hapus/nonaktifkan resepnya di DBS_BOM → baris null hilang → bug ikut hilang.
+(Dengan migrasi DAX, `F_Deviasi` memfilter `Attribute <> null` sehingga kolom
+"(blank)" juga bersih.)
+
+### Sheet yang TIDAK terdampak
+
+- **REKAP MENTAH** — 39 kolom bersih; baris null terbuang oleh `Table.Pivot` di `[FINAL]`
+  (bug tersembunyi, tidak terlihat di sheet ini).
+- **PIVOT HASIL SO (2)** — validasi 1.199/1.199 baris identik.
+- Semua sheet input & master — data sumber valid.
