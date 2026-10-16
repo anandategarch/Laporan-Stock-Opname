@@ -1,7 +1,19 @@
 # PANDUAN MIGRASI — Perhitungan Berat ke Data Model
 ## Laporan Stock Opname (Full Power Query → Power Query + DAX)
 
-> **Status validasi: LULUS 100%** — 15.765/15.810 baris CEK DEVIASI, 15.252/15.810 AKUMULASI,
+> **📦 STATUS FILE (UPDATE): file xlsx di repo ini SUDAH DIREVISI LANGSUNG** —
+> **Langkah 1 & Langkah 3 di bawah SUDAH diterapkan ke file** (3 query lama dihapus
+> dari DataMashup + 15 part pivot lama dibersihkan + 3 sheet pivot dikosongkan +
+> 3 query baru `F_Deviasi` / `F_HasilSO` / `Metric` sudah tertanam, terlihat di
+> panel Queries & Connections saat file dibuka).
+> **Yang tinggal Anda lakukan: Langkah 2 (Load To → Data Model), Langkah 4 (paste
+> measure DAX), Langkah 5 (bangun 3 pivot), Langkah 6 (refresh & validasi)** —
+> total ± 20 menit klik-klik UI. (Model Data / measure DAX tidak bisa disuntik
+> dari luar Excel — format `model.item` bersifat proprietary.)
+> Verifikasi struktur file pasca-revisi: **53/53 pemeriksaan otomatis LULUS**
+> (ZIP/CRC, rels graph, content-types, metadata PQ, konsistensi koneksi↔query).
+
+> **Status validasi angka: LULUS 100%** — 15.765/15.810 baris CEK DEVIASI, 15.252/15.810 AKUMULASI,
 > 1.199/1.199 PIVOT HASIL SO, dan seluruh teks Keterangan/Indikasi cocok persis dengan cache
 > pivot lama. Sisa selisih = **45 + 558 + 14 sel *known-fix*** = koreksi bug lama hari-1
 > (detail di `LAPORAN-VALIDASI.md`, bukan masalah baru).
