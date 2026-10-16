@@ -197,3 +197,29 @@ byte-identical. **53/53 pemeriksaan otomatis LULUS** (`so-surgery/validate.py`).
 4. Excel membatasi jumlah baris drillthrough pada pivot Data Model (grand total
    bisa terpotong); double-click sel spesifik (item × hari) selalu lengkap
    (1–5 baris per sel daun).
+
+---
+
+## LAMPIRAN 3 — Validasi Ulang v3 (Optimasi Single-Pass, fokus kecepatan)
+
+Perubahan v3 SATU-SATUNYA: `#"Buffered Input" = Table.Buffer(#"Removed Columns")`
+ditambahkan sebelum `Table.Pivot` di `F_Deviasi`. Latar: `Table.Pivot` harus
+meng-enumerate tabel 2× (a) `List.Distinct(…[JENIS])` untuk daftar kolom pivot,
+(b) scan data — dan karena M lazily-evaluated, tanpa buffer rantai upstream
+`Raw Rekap Mentah` (gabungan 8 sumber + join + konversi + group) berpotensi
+dievaluasi 2× per refresh. Buffer ± 15.810 baris menjamin evaluasi 1×.
+
+Hasil validasi ulang (`so-surgery/updates/validate_fdeviasi.py`) — **identik
+persis dengan hasil v2, tanpa satu angka pun berubah**:
+
+| Pemeriksaan | Hasil |
+|---|---|
+| CEK1 urutan 18 kolom vs cache1 | PASS — identik |
+| CEK2 domain | 15.810 baris, 0 null, Attribute 1..31 — PASS |
+| CEK3 nilai vs cache1 | 15.765 persis + 45 known-fix + 0 anomali + 0 extra — PASS |
+| CEK4 contoh before/after | ADONAN −11.512 / BERAS +9.270 / RICE WRAP −1.500 — PASS |
+| Struktur workbook (validate.py) | 53/53 LULUS, Section1.m byte-exact kecuali blok F_Deviasi |
+
+Sifat `Table.Buffer`: mematerialkan isi tabel di memori sekali per evaluasi —
+urutan baris, urutan kolom, dan nilai TIDAK berubah; hanya pola enumerasi
+yang berubah. Itulah sebabnya seluruh angka validasi tetap identik.

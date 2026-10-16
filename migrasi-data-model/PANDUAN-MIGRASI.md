@@ -1,8 +1,9 @@
 # PANDUAN MIGRASI — Perhitungan Berat ke Data Model
 ## Laporan Stock Opname (Full Power Query → Power Query + DAX)
 
-> **📦 STATUS FILE (UPDATE v2 — PARITAS DOUBLE-CLICK): file xlsx di repo ini
-> SUDAH DIREVISI LANGSUNG.** Pembaruan v2: `F_Deviasi` kini ber-**18 kolom**
+> **📦 STATUS FILE (UPDATE v3 — PARITAS DOUBLE-CLICK + OPTIMASI SINGLE-PASS):
+> file xlsx di repo ini SUDAH DIREVISI LANGSUNG.** Pembaruan v2: `F_Deviasi` kini
+> ber-**18 kolom**
 > (replika persis output query lama `RFC_Rekap Mentah [CEK DEVIASI] Raw`), sehingga
 > **double-click / Show Details di pivot CEK DEVIASI HARIAN menampilkan 18 kolom
 > yang sama persis dengan file sampel** — KATEGORI, NAMA BARANG, JENIS, SATUAN,
@@ -20,6 +21,15 @@
 > Verifikasi struktur file pasca-revisi: **53/53 pemeriksaan otomatis LULUS**
 > (ZIP/CRC, rels graph, content-types, metadata PQ, konsistensi koneksi↔query,
 > Section1.m byte-exact).
+>
+> **⚡ Pembaruan v3 (fokus kecepatan, tanpa perubahan angka):** langkah
+> `Table.Buffer(#"Removed Columns")` ditambahkan SEBELUM `Table.Pivot` di
+> `F_Deviasi`. Alasan: `Table.Pivot` meng-enumerate tabel 2× (List.Distinct
+> untuk daftar JENIS + scan data) — tanpa buffer, M dapat mengevaluasi ulang
+> seluruh rantai upstream `Raw Rekap Mentah` (gabungan 8 sumber + join +
+> konversi + group) **dua kali per refresh**. Buffer ± 16 ribu baris menjamin
+> evaluasi 1× saja. Validasi ulang: hasil CEK1–4 identik byte-per-byte (15.765
+> + 45 known-fix + 0 anomali) — angka tidak berubah sama sekali.
 >
 > **⚡ SUDAH TERMIGRASI PAKAI PANDUAN v1? Jangan download ulang — lihat bagian
 > "UPGRADE FILE YANG SUDAH TERMIGRASI (± 10 MENIT)" di bawah.**
@@ -167,6 +177,11 @@ Untuk tiap sheet: buka sheet lama, hapus isi area pivot lama, lalu
 Pakai bagian ini bila file kerja Anda **sudah** termigrasi dengan panduan v1
 (sudah load F_Deviasi ke Data Model, sudah pasang measure, sudah bangun pivot).
 **Tidak perlu download ulang file repo** — cukup ganti isi query `F_Deviasi`:
+
+> Catatan v3: bila F_Deviasi Anda masih versi tanpa langkah
+> `#"Buffered Input" = Table.Buffer(#"Removed Columns")` sebelum
+> `Table.Pivot` — paste versi terbaru dari `Section1_Revisi.m` untuk
+> refresh single-pass (lebih cepat, angka tetap identik).
 
 1. **Data → Queries & Connections** → klik kanan **`F_Deviasi`** → **Edit…**
    (Power Query Editor terbuka).

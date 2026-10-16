@@ -528,9 +528,16 @@ shared F_Deviasi = let
         #"Filtered Rows",
         {"SOURCE DATA", "KETERANGAN", "PENYEBAB TERJADINYA WASTE", "STATUS"}
     ),
+    // 🔥 OPTIMASI SINGLE-PASS (fokus kecepatan): Table.Pivot memerlukan
+    // daftar nilai JENIS (List.Distinct -> enumerasi #1) lalu memindai
+    // ulang tabelnya (enumerasi #2). Tanpa buffer, M yang laziness-nya
+    // mengevaluasi ulang seluruh rantai upstream "Raw Rekap Mentah"
+    // (gabungan 8 sumber + join + konversi + group) dua kali per
+    // refresh. Table.Buffer (~16 ribu baris, murah) menjamin 1x saja.
+    #"Buffered Input" = Table.Buffer(#"Removed Columns"),
     #"Pivoted Column" = Table.Pivot(
-        #"Removed Columns",
-        List.Distinct(#"Removed Columns"[JENIS]),
+        #"Buffered Input",
+        List.Distinct(#"Buffered Input"[JENIS]),
         "JENIS",
         "Value",
         List.Sum
