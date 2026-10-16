@@ -1,0 +1,153 @@
+// ============================================================================
+// DAX MEASURES — MIGRASI DATA MODEL LAPORAN STOCK OPNAME
+// ----------------------------------------------------------------------------
+// Cara pakai : Power Pivot tab > Measures > New Measure
+//              (atau: buka jendela Power Pivot > area perhitungan)
+// Home table : sesuai kolom "Tabel" di bawah. Rumus dipaste apa adanya.
+// Format     : set "Number" + 0 desimal + pemisah ribuan untuk semua
+//              measure angka (Keterangan/Indikasi = format Text).
+// Kompatibel : Excel 2016+ (tanpa SELECTEDVALUE/REMOVEFILTERS/IN operator).
+// ============================================================================
+
+// ============================================================
+// 1. METRIK DASAR PER JENIS                     [Tabel: F_Deviasi]
+// ============================================================
+// Nama: SO
+CALCULATE ( SUM ( F_Deviasi[Value] ), F_Deviasi[JENIS] = "SO" )
+
+// Nama: Barang Masuk
+CALCULATE ( SUM ( F_Deviasi[Value] ), F_Deviasi[JENIS] = "BARANG MASUK" )
+
+// Nama: Barang Keluar
+CALCULATE ( SUM ( F_Deviasi[Value] ), F_Deviasi[JENIS] = "BARANG KELUAR" )
+
+// Nama: BOM
+CALCULATE ( SUM ( F_Deviasi[Value] ), F_Deviasi[JENIS] = "BOM" )
+
+// Nama: Waste
+CALCULATE ( SUM ( F_Deviasi[Value] ), F_Deviasi[JENIS] = "WASTE" )
+
+// Nama: Susut
+CALCULATE ( SUM ( F_Deviasi[Value] ), F_Deviasi[JENIS] = "SUSUT" )
+
+// Nama: Trial
+CALCULATE ( SUM ( F_Deviasi[Value] ), F_Deviasi[JENIS] = "TRIAL" )
+
+// Nama: Stok Awal
+CALCULATE ( SUM ( F_Deviasi[Value] ), F_Deviasi[JENIS] = "STOCK AWAL" )
+
+// ============================================================
+// 2. SO KEMARIN                                 [Tabel: F_Deviasi]
+//    SO pada hari terakhir yang ADA sebelum hari berjalan.
+//    Baris pertama item -> Stok Awal.
+//    Persis logika "SOKemarinList" M, tanpa bug baris-null.
+// ============================================================
+// Nama: SO Kemarin
+VAR d =
+    MAX ( F_Deviasi[Attribute] )
+VAR dPrev =
+    CALCULATE (
+        MAX ( F_Deviasi[Attribute] ),
+        FILTER ( ALL ( F_Deviasi[Attribute] ), F_Deviasi[Attribute] < d )
+    )
+RETURN
+    IF (
+        ISBLANK ( dPrev ),
+        CALCULATE ( [Stok Awal], ALL ( F_Deviasi[Attribute] ) ),
+        CALCULATE ( [SO], F_Deviasi[Attribute] = dPrev )
+    )
+
+// ============================================================
+// 3. RANTAI DEVIASI                             [Tabel: F_Deviasi]
+//    (replikasi persis rumus M lama)
+// ============================================================
+// Nama: Stok Seharusnya
+[SO Kemarin] + [Barang Masuk] - [Barang Keluar] - [BOM]
+
+// Nama: Deviasi
+[SO] - [Stok Seharusnya]
+
+// Nama: Waste (Neg)
+- ABS ( [Waste] )
+
+// Nama: Susut (Neg)
+- ABS ( [Susut] )
+
+// Nama: Trial (Neg)
+- ABS ( [Trial] )
+
+// Nama: Loss Surplus
+[Deviasi] - [Waste (Neg)] - [Susut (Neg)] - [Trial (Neg)]
+
+// ============================================================
+// 4. SWITCH METRIK + RUNNING TOTAL              [Tabel: Metric]
+//    Nilai Metric  : nilai harian per metrik (pivot CEK DEVIASI)
+//    Akumulasi     : running total s/d hari berjalan (pivot AKUMULASI)
+// ============================================================
+// Nama: Nilai Metric
+SUMX (
+    VALUES ( Metric[Metric] ),
+    VAR m = Metric[Metric]
+    RETURN
+        IF ( m = "1.DEVIASI", [Deviasi],
+         IF ( m = "2.WASTE", [Waste (Neg)],
+         IF ( m = "3.SUSUT", [Susut (Neg)],
+         IF ( m = "4.TRIAL", [Trial (Neg)],
+         IF ( m = "5.LOSS/SURPLUS", [Loss Surplus] ) ) ) ) )
+)
+
+// Nama: Akumulasi Metric
+VAR d = MAX ( F_Deviasi[Attribute] )
+RETURN
+    CALCULATE (
+        [Nilai Metric],
+        FILTER ( ALL ( F_Deviasi[Attribute] ), F_Deviasi[Attribute] <= d )
+    )
+
+// ============================================================
+// 5. DIAGNOSA TEKS (opsional untuk display)     [Tabel: Metric]
+//    Teks persis dengan kolom Keterangan/Indikasi query lama.
+// ============================================================
+// Nama: Keterangan
+VAR m = IF ( HASONEVALUE ( Metric[Metric] ), VALUES ( Metric[Metric] ) )
+VAR v = [Nilai Metric]
+RETURN
+    IF (
+        m = "1.DEVIASI" || m = "5.LOSS/SURPLUS",
+        IF ( v < 0, "SO lebih sedikit daripada perhitungan stock seharusnya",
+         IF ( v > 0, "SO lebih banyak daripada perhitungan stock seharusnya",
+            "Stok Sesuai Perhitungan" ) ),
+        "-"
+    )
+
+// Nama: Indikasi
+VAR m = IF ( HASONEVALUE ( Metric[Metric] ), VALUES ( Metric[Metric] ) )
+VAR val = [Nilai Metric]
+VAR soNow = [SO]
+VAR soPrev = [SO Kemarin]
+VAR masuk = [Barang Masuk]
+VAR keluar = [Barang Keluar]
+VAR bom = [BOM]
+RETURN
+    IF (
+        NOT ( m = "1.DEVIASI" || m = "5.LOSS/SURPLUS" ),
+        "-",
+        IF ( soNow > soPrev && masuk = 0,
+            "Barang Masuk belum tercatat (Stok SO naik tapi Barang Masuk = 0)",
+         IF ( soNow = soPrev && bom > 0 && masuk = 0,
+            "Stok SO tidak berkurang meski ada penjualan/BOM",
+         IF ( soNow < soPrev && keluar = 0 && bom = 0,
+            "FIX: Barang Keluar / BOM belum tercatat (Stok SO turun tapi pemakaian di sistem = 0)",
+         IF ( val > 0,
+            "1. Barang Masuk belum tercatat | 2. Under Takaran | 3. Salah catat Barang Keluar",
+         IF ( val < 0,
+            "1. Barang Keluar belum tercatat (Kiriman/retur ke resto lain/DC) | 2. Pencatatan Promix 00 kurang tepat | 3. Loss karna Waste/Susut atau Over Takaran",
+            "-" ) ) ) ) )
+    )
+
+// ============================================================
+// 6. PIVOT HASIL SO — tidak perlu measure khusus
+//    Cukup drag F_HasilSO[Value] ke Values (Sum).
+//    (JENIS="SO", item berkode, tanpa KUAH BAKSO sudah baked-in
+//     di query F_HasilSO — lihat Section1_Revisi.m)
+// ============================================================
