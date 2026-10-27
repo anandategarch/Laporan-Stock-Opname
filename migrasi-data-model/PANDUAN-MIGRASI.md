@@ -1,9 +1,23 @@
 # PANDUAN MIGRASI — Perhitungan Berat ke Data Model
 ## Laporan Stock Opname (Full Power Query → Power Query + DAX)
 
-> **📦 STATUS FILE (UPDATE v4 — PANEL QUERY DIRAPIKAN: 11 GRUP ACAK → 6 GRUP BERNOMOR):**
+> **📦 STATUS FILE (UPDATE v5 — PIVOT HASIL SO: PARITAS FILTER "JENIS"):**
 > file xlsx di repo ini SUDAH DIREVISI LANGSUNG.
-> Pembaruan v4: seluruh **44 query dipindah ke 6 folder bernomor** di panel
+> Pembaruan v5: `F_HasilSO` kini memuat **SEMUA 8 JENIS** (SO, STOCK AWAL,
+> BARANG MASUK, BARANG KELUAR, BOM, WASTE, SUSUT, TRIAL) **plus kolom
+> `JENIS`**. Ground truth file sampel: tabel query lama memuat semua 8 jenis
+> dan memfilternya **di pivot** — dropdown "JENIS" (default **SO**) di
+> pojok kiri sheet PIVOT HASIL SO (2), bisa diganti interaktif. Migrasi
+> v1–v4 mengeraskan slice `JENIS="SO"` di query → dropdown itu hilang;
+> v5 mengembalikan paritas penuh: seret `F_HasilSO[JENIS]` ke **FILTERS**
+> pivot dan pilih "SO" (Langkah 5).
+> Validasi v5 vs cache pivot lama: **37.169 sel nilai (1.199 baris × 31 hari)
+> 100% persis**, subset SO tidak berubah 1 byte pun nilainya, 8 JENIS lengkap,
+> 43 query lain byte-identical (`so-surgery/updates/validate_fhasilso.py`).
+> File Anda sudah termigrasi v1–v4? Ikuti bagian "UPGRADE" sub-B (± 3 menit).
+>
+> **PEMBARUAN v4 — PANEL QUERY DIRAPIKAN: 11 GRUP ACAK → 6 GRUP BERNOMOR:**
+> seluruh **44 query dipindah ke 6 folder bernomor** di panel
 > Queries & Connections (lihat seksi "STRUKTUR PANEL QUERY (v4)" di bawah),
 > folder kosong `INPUT` dan 4 folder sisa (TRIAL/WASTE/SUSUT/DATABASE MENU) dihapus,
 > dan 3 query yang tadinya *menggantung tanpa folder* (`RFC_Database_Susut`,
@@ -33,15 +47,17 @@
 > Section1.m byte-exact, blob QueryGroups 6 grup, 44/44 query ber-grup).
 >
 > **Status validasi angka: LULUS 100%** — 15.765/15.810 baris CEK DEVIASI,
-> 15.252/15.810 AKUMULASI, 1.199/1.199 PIVOT HASIL SO, dan seluruh teks
+> 15.252/15.810 AKUMULASI, 1.199/1.199 PIVOT HASIL SO (v5: 37.169 sel nilai
+> persis, semua 8 JENIS), dan seluruh teks
 > Keterangan/Indikasi cocok persis dengan cache pivot lama. Sisa selisih =
 > **45 + 558 + 14 sel *known-fix*** = koreksi bug lama hari-1 (detail di
 > `LAPORAN-VALIDASI.md`, bukan masalah baru).
 >
 > **Riwayat pembaruan:** v1 migrasi awal (hapus 3 query output, tanam 3 tabel Data
 > Model) · v2 `F_Deviasi` 18 kolom (paritas double-click) · v3 `Table.Buffer`
-> single-pass (kecepatan, angka identik) · **v4 panel query 6 folder bernomor**.
-> Sudah termigrasi pakai panduan v1–v3? Tidak perlu download ulang — cukup ikuti
+> single-pass (kecepatan, angka identik) · v4 panel query 6 folder bernomor ·
+> **v5 `F_HasilSO` semua 8 JENIS + kolom JENIS (paritas dropdown "JENIS")**.
+> Sudah termigrasi pakai panduan v1–v4? Tidak perlu download ulang — cukup ikuti
 > bagian "UPGRADE FILE YANG SUDAH TERMIGRASI (± 10 MENIT)".
 
 ---
@@ -54,7 +70,7 @@
 | 2 | `RFC_Rekap Mentah [CEK DEVIASI] Akumulasi` | ❌ HAPUS (running total = 1 measure DAX) |
 | 3 | `Raw Rekap Mentah [FINAL] PIVOT HASIL SO` | ❌ HAPUS (diganti `F_HasilSO`) |
 | 4 | `F_Deviasi` | ➕ BARU — fakta 18 kolom (CEK DEVIASI & AKUMULASI, drillthrough = sampel) |
-| 5 | `F_HasilSO` | ➕ BARU — fakta PIVOT HASIL SO |
+| 5 | `F_HasilSO` | ➕ BARU — fakta PIVOT HASIL SO: **semua 8 JENIS + kolom `JENIS`**; filter jenis ada **di pivot** (FILTERS, default SO) — persis sampel (v5) |
 | 6 | `Metric` | ➕ BARU — dimensi 5 metrik (kini **opsional** — `F_Deviasi[JENIS]` sudah memuat label metrik) |
 | 7 | `Raw Rekap Mentah` | ⚪ TETAP connection-only (tidak ke model) |
 | 8 | `RFC_Kode Barang` | ⚪ TETAP connection-only (dipakai `F_HasilSO`) |
@@ -181,10 +197,16 @@ Untuk tiap sheet: buka sheet lama, hapus isi area pivot lama, lalu
 - ROWS / COLUMNS: sama dengan di atas
 - VALUES:  `[Akumulasi]` (measure Langkah 4)
 
-**PIVOT HASIL SO (2)** (baru):
+**PIVOT HASIL SO (2)** (baru — layout persis pivot sampel):
+- FILTERS: `F_HasilSO[JENIS]` = **SO** — persis dropdown "JENIS" di file
+  sampel (sel A1/B1 sheet lama). Boleh diganti ke jenis lain (STOCK AWAL,
+  BARANG MASUK, dst.) — angka mengikuti, 100% storage engine (cepat).
+  Alternatif tampilan: taruh `JENIS` di **Slicer**.
 - ROWS:    `F_HasilSO[KODE BARANG]` → `F_HasilSO[NAMA BARANG]` → `F_HasilSO[SATUAN]`
 - COLUMNS: `F_HasilSO[Attribute]`
-- VALUES:  `F_HasilSO[Value]` (Sum) — tidak perlu measure/filter apa pun
+- VALUES:  `F_HasilSO[Value]` (Sum) — tidak perlu measure
+- ⚠️ **WAJIB pasang filter JENIS**: tanpa itu, Sum of Value menjumlahkan
+  SEMUA jenis sekaligus (SO + MASUK + KELUAR + …) — tidak bermakna.
 
 ## LANGKAH 6 — Refresh & validasi angka (± 5 menit)
 
@@ -208,9 +230,16 @@ Untuk tiap sheet: buka sheet lama, hapus isi area pivot lama, lalu
 
 ## UPGRADE FILE YANG SUDAH TERMIGRASI (± 10 MENIT)
 
-Pakai bagian ini bila file kerja Anda **sudah** termigrasi dengan panduan v1
-(sudah load F_Deviasi ke Data Model, sudah pasang measure, sudah bangun pivot).
-**Tidak perlu download ulang file repo** — cukup ganti isi query `F_Deviasi`:
+Pakai bagian ini bila file kerja Anda termigrasi dengan panduan versi lama
+(v1–v4). **Tidak perlu download ulang file repo** — cukup ganti isi 2 query
+lewat Advanced Editor:
+
+- **Sub-A `F_Deviasi`** — WAJIB bila masih versi v1 (tanpa 18 kolom / tanpa
+  `Table.Buffer` single-pass v3).
+- **Sub-B `F_HasilSO`** — WAJIB bila masih versi v1–v4 (tabel SO-only): ini
+  pembaruan **v5** (semua 8 JENIS + kolom `JENIS`).
+
+### Sub-A — Ganti `F_Deviasi` (lewati bila sudah v3+)
 
 > Catatan v3: bila F_Deviasi Anda masih versi tanpa langkah
 > `#"Buffered Input" = Table.Buffer(#"Removed Columns")` sebelum
@@ -227,22 +256,46 @@ Pakai bagian ini bila file kerja Anda **sudah** termigrasi dengan panduan v1
 3. **Data → Refresh All** (2×). Tabel `F_Deviasi` di model otomatis dapat
    kolom-kolom baru; kolom lama (`KATEGORI`, `NAMA BARANG`, `JENIS`, `SATUAN`,
    `Attribute`, `Value`) tetap — tidak ada yang putus.
-4. **Pivot CEK DEVIASI HARIAN** — rapikan field list:
+
+### Sub-B — Ganti `F_HasilSO` (v5 — paritas filter "JENIS" pivot sampel)
+
+4. **Data → Queries & Connections** → klik kanan **`F_HasilSO`** → **Edit…** →
+   **Advanced Editor** → select semua → paste kode `F_HasilSO` terbaru dari
+   `Section1_Revisi.m` (mulai `let` sampai `in\n    Typed`) → **OK**.
+   → Preview: kini ada kolom **JENIS** dan baris BUKAN-SO ikut ter-load
+   (8 jenis: SO, STOCK AWAL, BARANG MASUK, BARANG KELUAR, BOM, WASTE,
+   SUSUT, TRIAL). → **Close & Load** (tujuan load tidak berubah).
+5. **Data → Refresh All** (2×).
+
+### Sub-C — Rapikan pivot (setelah refresh Sub-A/B)
+
+6. **Pivot CEK DEVIASI HARIAN** — rapikan field list:
    - ROWS: hapus `Metric[Metric]`, ganti dengan `F_Deviasi[JENIS]`
      (urutan: KATEGORI → NAMA BARANG → JENIS → SATUAN).
    - VALUES: hapus `[Nilai Metric]`, ganti `F_Deviasi[Value]` (Sum of Value).
-5. **Pivot AKUMULASI** — VALUES: hapus `[Akumulasi Metric]`, ganti measure
-   `[Akumulasi]` (buat dulu bila belum ada — rumus di Langkah 4); ROWS idem langkah 4.
-6. **Pivot PIVOT HASIL SO** — tidak perlu disentuh.
-7. *(Opsional)* Bersihkan measure generasi-1 yang tak terpakai:
+7. **Pivot AKUMULASI** — VALUES: hapus `[Akumulasi Metric]`, ganti measure
+   `[Akumulasi]` (buat dulu bila belum ada — rumus di Langkah 4); ROWS idem langkah 6.
+8. **Pivot PIVOT HASIL SO — WAJIB DISSENTUH setelah Sub-B:** seret
+   `F_HasilSO[JENIS]` ke area **FILTERS** (atau Filters di panel PivotTable
+   Fields) dan pilih **"SO"**. Ini persis dropdown "JENIS" di file sampel.
+   ⚠️ Tanpa filter ini, Sum of Value menjumlahkan SEMUA jenis sekaligus —
+   angkanya jadi salah. (Alternatif: taruh `JENIS` di Slicer agar bisa
+   ganti jenis sekali klik — sama seperti kelakuan file sampel.)
+9. *(Opsional)* Bersihkan measure generasi-1 yang tak terpakai:
    **Power Pivot → Measures → Manage** → hapus measure dari daftar bagian 3
    `DAX-Measures.dax`. Tidak wajib — hanya supaya field list rapi.
-8. Tes double-click di CEK DEVIASI HARIAN → 18 kolom persis sampel. Selesai.
+10. Tes double-click di CEK DEVIASI HARIAN → 18 kolom persis sampel; cek
+    PIVOT HASIL SO (filter SO) vs `LAPORAN-VALIDASI.md`. Selesai.
 
-> Kenapa langkah 4–5 perlu? Measure v1 membaca `JENIS` sebagai label sumber
+> Kenapa langkah 6–7 perlu? Measure v1 membaca `JENIS` sebagai label sumber
 > (SO / STOCK AWAL / …). Di skema v2, `JENIS` berisi label **metrik**
 > (1.DEVIASI … 5.LOSS/SURPLUS) — sama seperti kolom `JENIS` di file sampel.
 > Nilai metrik sudah tersimpan di kolom `Value`, jadi cukup "Sum of Value".
+>
+> Kenapa Sub-B perlu? Di file sampel, filter "JENIS" pivot PIVOT HASIL SO
+> itu ada **di pivot-nya** (dropdown interaktif, default SO) — tabel
+> sumbernya memuat semua 8 jenis. Versi v1–v4 F_HasilSO mengeraskan slice
+> di query sehingga dropdown hilang. Sub-B mengembalikan perilaku sampel.
 
 ---
 
@@ -254,9 +307,10 @@ Pakai bagian ini bila file kerja Anda **sudah** termigrasi dengan panduan v1
 | 2 | Sel kosong pivot | 0 | blank → set: pivot **Options → Layout & Format → "For empty cells show: 0"** |
 | 3 | Grand total baris AKUMULASI | penjumlahan kolom (tak bermakna) | akumulasi s/d hari 31 (benar); matikan grand total baris jika mau identik visual |
 | 4 | Kolom teks Keterangan/Indikasi | kolom tabel (muncul saat double-click) | **SAMA seperti lama** — kini kolom tabel `F_Deviasi`, muncul saat double-click (paritas v2) |
-| 5 | Double-click CEK DEVIASI HARIAN | 18 kolom | **18 kolom identik** (paritas v2) |
-| 6 | Double-click AKUMULASI | 18 kolom + kolom `AKUMULASI` | 18 kolom (kolom `Value` = nilai harian, bukan running total; angka running total tetap benar di sel pivot via measure) |
-| 7 | Baris detail | termasuk 70 baris `(blank)` bug | tanpa baris null (bersih) |
+| 5 | Dropdown "JENIS" di PIVOT HASIL SO | report field di pivot (default SO, bisa ganti jenis interaktif) | **SAMA (v5)** — `F_HasilSO[JENIS]` di FILTERS/Slicer; tabel memuat semua 8 JENIS (v1–v4: tabel SO-only, dropdown hilang) |
+| 6 | Double-click CEK DEVIASI HARIAN | 18 kolom | **18 kolom identik** (paritas v2) |
+| 7 | Double-click AKUMULASI | 18 kolom + kolom `AKUMULASI` | 18 kolom (kolom `Value` = nilai harian, bukan running total; angka running total tetap benar di sel pivot via measure) |
+| 8 | Baris detail | termasuk 70 baris `(blank)` bug | tanpa baris null (bersih) |
 
 ## PANEN OPTIMASI
 
@@ -302,13 +356,20 @@ tetap di M:**
 4. Keterangan/Indikasi = nested IF teks → di DAX jadi `SWITCH` panjang yang
    sulit dirawat.
 
-**Kenapa filter JENIS untuk PIVOT HASIL SO tetap di M (tabel F_HasilSO):**
-- Measure TIDAK BISA mengubah domain BARIS pivot (baris pivot = nilai kolom
-  tabel). Domain PIVOT HASIL SO = item berkode (join RFC_Kode) + JENIS="SO" —
-  dan domainnya berbeda dari F_Deviasi (ada GORENG MEKAR, tanpa KUAH
-  BAKSO) → wajib jadi tabel material tersendiri → M (bahasa ETL) adalah
-  tempat yang benar. Calculated table DAX bisa teknis, tapi berarti
-  menulis ulang join dalam DAX: lebih lambat, lebih sulit dibaca, nol untung.
+**Filter JENIS untuk PIVOT HASIL SO — ada di PIVOT, bukan di M (diperbaiki v5):**
+- Ground truth file sampel: tabel query lama "[FINAL] PIVOT HASIL SO" memuat
+  SEMUA 8 JENIS (dibuktikan sharedItems cache3) dan pivotnya memfilter lewat
+  REPORT FIELD "JENIS" (default SO, bisa diganti interaktif — sel A1/B1
+  sheet sampel: `JENIS | SO`). v1–v4 sempat mengeraskan slice `JENIS="SO"`
+  di query — angka default-nya benar, tapi dropdown-nya hilang. v5:
+  `F_HasilSO` memuat semua 8 JENIS + kolom `JENIS`, slice pindah ke
+  FILTERS pivot (default SO) = paritas penuh; filter field pivot tetap
+  100% storage engine (tanpa formula engine), jadi tidak ada biaya performa.
+- Yang TETAP wajib di M adalah DOMAIN tabelnya: join RFC_Kode (item berkode
+  — domainnya memang beda dari F_Deviasi: ada GORENG MEKAR, tanpa KUAH
+  BAKSO) + buang `Attribute=null`. Measure memang tak bisa mengubah domain
+  BARIS pivot, tapi slice satu kolom (JENIS=SO) tidak butuh measure — cukup
+  field filter di pivot.
 
 **Yang memang pindah ke model: hanya [Akumulasi]** — running total
 bergantung konteks (kolom pivot = hari berjalan). Di M ia butuh

@@ -295,3 +295,69 @@ Karena M tidak berubah, seluruh angka validasi Lampiran 1–3 berlaku identik
 (15.765 + 45 known-fix + 0 anomali; AKUMULASI 15.252 + 558; PIVOT HASIL SO
 1.199/1.199). Perubahan v4 murni kosmetik pada metadata panel — bukan pada
 perhitungan.
+
+---
+
+## LAMPIRAN 5 — v5: PARITAS FILTER "JENIS" DI PIVOT HASIL SO
+
+Pertanyaan user: *"di F_HasilSO tidak bisa ditambahkan JENIS yang sumbernya
+dari Rekap Mentah?"* — jawabannya **bisa, dan ternyata memang seharusnya
+begitu.** Penyelidikan ulang file sampel menemukan bahwa pemahaman v1–v4
+tentang filter JENIS keliru arah.
+
+### 5.1 Temuan ground truth (bukti dari file sampel asli)
+
+| Bukti | Hasil |
+|---|---|
+| `pivotCacheDefinition3.xml` — sharedItems kolom `JENIS` | **8 nilai**: BARANG KELUAR, BARANG MASUK, SO, STOCK AWAL, BOM, SUSUT, TRIAL, WASTE → tabel query lama `"Raw Rekap Mentah [FINAL] PIVOT HASIL SO"` (cache3, 1.199 baris) memuat **SEMUA jenis**, TIDAK difilter ke SO |
+| `pivotTable3.xml` (pivot PIVOT HASIL SO (2)) | `<pageField fld="2" .../>` → `JENIS` adalah **REPORT FILTER di pivot** (fld 2 = JENIS), bukan filter query |
+| Render sheet PIVOT HASIL SO (2), sel A1/B1 | `JENIS \| SO` → filter tampil di pojok kiri pivot, **bisa diganti interaktif** (dropdown) |
+| Query lama `"[FINAL] PIVOT HASIL SO"` (Section1.m asli) | hanya join `RFC_Kode Barang` + filter `KODE BARANG <> null` — **tidak ada filter JENIS** |
+
+Artinya: di file sampel, kemampuan ganti-ganti jenis (SO → STOCK AWAL →
+BARANG MASUK → …) itu **fitur interaktif pivot**. Migrasi v1–v4 mengeraskan
+slice `JENIS="SO"` di query M dan membuang kolomnya — tampilan default
+benar, tapi **dropdown itu hilang** (regresi interaktivitas yang tidak
+disadari sampai user menanyakannya).
+
+### 5.2 Perbaikan v5
+
+`F_HasilSO` diubah (satu blok query, 43 lainnya tidak disentuh):
+1. Filter `[JENIS] = "SO"` **dihapus** — semua 8 jenis ikut ter-load.
+2. Kolom **`JENIS` ikut** (SelectColumns + TransformColumnTypes text).
+3. Domain lain tetap: join `RFC_Kode` (item berkode) + `Attribute <> null`.
+4. Posisi slice pindah ke pivot: `F_HasilSO[JENIS]` di **FILTERS** pivot,
+   default **"SO"** (layout di PANDUAN-MIGRASI Langkah 5 / DAX-Measures.dax
+   seksi 2). Filter field pivot = murni storage engine → **tanpa biaya
+   performa**.
+
+### 5.3 Validasi v5 (`so-surgery/updates/validate_fhasilso.py`, 15 cek LULUS)
+
+| Pemeriksaan | Hasil |
+|---|---|
+| Subset SO v5 == tabel v4 (set baris + nilai persis) | **PASS — 0 mismatch** → angka SO tidak berubah |
+| Distinct JENIS tabel v5 == sharedItems cache3 (8 jenis) | PASS |
+| Bijeksi 5-tuple sheet↔cache (0 duplikat) → perbandingan baris-ke-baris 1:1 sah | PASS (1.199/1.199) |
+| Meta baris cache3: KODE + KATEGORI + SATUAN | PASS 1.199/1.199 |
+| **Nilai sel 1:1: 37.169 sel (1.199 baris × 31 hari) vs cache3** | **PASS — 100% persis, 0 selisih** |
+| Pivot-view (sum per NAMA×JENIS×hari, cara pivot lama menjumlah) | PASS — 0 mismatch dari 20.274 sel berdata |
+| Struktur M: filter `JENIS="SO"` hilang, kolom+tipe JENIS ada, filter KODE/Attribute tetap | PASS |
+| Diff vs git: hanya blok `F_HasilSO` yang berubah, 43 query byte-identical | PASS |
+| Struktur workbook (rebuild + `so-surgery/validate.py`) | **65/65 LULUS** |
+
+Catatan cakupan: perbandingan nilai memakai rekonstruksi dari sheet
+REKAP MENTAH (wide, 0-filled) — superset dari baris long sesungguhnya;
+selisih hanya baris berisi 0 artifak fill yang tidak memengaruhi nilai
+maupun tampilan pivot (perilaku blank-vs-0 sudah terdokumentasi di
+PANDUAN "PERILAKU BERBEDA" #2, berlaku sama untuk semua jenis).
+
+### 5.4 Konsekuensi & upgrade
+
+- **File baru (download repo):** bangun pivot PIVOT HASIL SO dengan
+  `F_HasilSO[JENIS]` di FILTERS = "SO" — perilaku = sampel penuh
+  (dropdown bisa ganti jenis).
+- **File yang sudah termigrasi v1–v4:** ikuti PANDUAN "UPGRADE" Sub-B
+  (paste ulang `F_HasilSO`) + Sub-C langkah 8 (pasang filter JENIS di
+  pivot). ⚠️ Tanpa filter, Sum of Value menjumlahkan semua jenis.
+- Angka hasil (default SO) **identik** dengan semua validasi sebelumnya
+  (1.199/1.199; subset SO 0 mismatch).

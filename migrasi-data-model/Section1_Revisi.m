@@ -758,11 +758,22 @@ shared F_HasilSO = let
     // Pengganti query lama "Raw Rekap Mentah [FINAL] PIVOT HASIL SO"
     // tapi dari tabel LONG (tanpa pivot hari di M):
     //   - join KODE BARANG via RFC_Kode Barang (LeftOuter, filter non-null)
-    //   - hanya JENIS = "SO" (sesuai tampilan pivot lama)
-    //   - buang Attribute=null
+    //   - SEMUA 8 JENIS ikut ter-load (SO, STOCK AWAL, BARANG MASUK,
+    //     BARANG KELUAR, BOM, WASTE, SUSUT, TRIAL) — PERSIS SEPERTI
+    //     query lama. Di file sampel, filter JENIS ada DI PIVOT-nya
+    //     (report field "JENIS = SO", bisa diganti interaktif ke jenis
+    //     lain), bukan di query — jadi kolom JENIS wajib ikut.
+    //   - buang Attribute=null (baris BOM menu-trial tanpa hari)
     // Domain identik dengan pivot lama: item berkode (mencakup
     // GORENG MEKAR / kategori MENU MIX, tanpa KUAH BAKSO yang sudah
     // difilter di Raw Rekap Mentah).
+    // CARA PAKAI PIVOT (detail di PANDUAN-MIGRASI Langkah 5):
+    //   FILTERS: F_HasilSO[JENIS] = SO (default; boleh ganti — sama
+    //            seperti dropdown "JENIS" di pivot sampel)
+    //   ROWS    : KODE BARANG > NAMA BARANG > SATUAN
+    //   COLUMNS : Attribute     VALUES: Sum of Value
+    // ⚠️ Tanpa filter JENIS, Sum of Value menjumlahkan SEMUA jenis
+    //    sekaligus (tidak bermakna) — pastikan filter terpasang.
     // Load: Only Create Connection + Add to Data Model.
     // =============================================================
     Source = #"Raw Rekap Mentah",
@@ -777,7 +788,6 @@ shared F_HasilSO = let
     Filtered = Table.SelectRows(
         Expanded,
         each [KODE BARANG] <> null
-            and [JENIS] = "SO"
             and [Attribute] <> null
     ),
     Selected = Table.SelectColumns(
@@ -786,6 +796,7 @@ shared F_HasilSO = let
             "KATEGORI",
             "KODE BARANG",
             "NAMA BARANG",
+            "JENIS",
             "SATUAN",
             "Attribute",
             "Value"
@@ -798,6 +809,7 @@ shared F_HasilSO = let
             {"KATEGORI", type text},
             {"KODE BARANG", type text},
             {"NAMA BARANG", type text},
+            {"JENIS", type text},
             {"SATUAN", type text},
             {"Attribute", Int64.Type},
             {"Value", type number}
