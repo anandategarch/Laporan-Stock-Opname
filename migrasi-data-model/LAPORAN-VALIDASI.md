@@ -361,3 +361,78 @@ PANDUAN "PERILAKU BERBEDA" #2, berlaku sama untuk semua jenis).
   pivot). ⚠️ Tanpa filter, Sum of Value menjumlahkan semua jenis.
 - Angka hasil (default SO) **identik** dengan semua validasi sebelumnya
   (1.199/1.199; subset SO 0 mismatch).
+
+---
+
+## LAMPIRAN 6 — v6: BARIS HITUNG `6.PEMAKAIAN (COM)` DI F_HasilSO
+
+Permintaan user: *"tambahkan logika perhitungan COM dengan lihat dari
+formula query di atas"* — disertai query referensi dari file produksi
+(tabel long ber-JENIS metrik `1.DEVIASI` … `9.STOK AWAL` + kolom
+KETERANGAN). Rumus intinya:
+
+```
+pemakaian(i=0) = STOK AWAL           + BARANG MASUK - BARANG KELUAR - SO
+pemakaian(i>0) = SO hari sebelumnya  + BARANG MASUK - BARANG KELUAR - SO(hari ini)
+```
+
+### 6.1 Keputusan desain
+
+| Hal | Keputusan | Alasan |
+|---|---|---|
+| Lokasi | `F_HasilSO` (baris JENIS tambahan), BUKAN kolom baru di `F_Deviasi` | 18 kolom drillthrough CEK DEVIASI dikunci persampel (Lampiran 2); pivot PIVOT HASIL SO memang berbasis filter JENIS → metrik baru = nilai JENIS baru |
+| Label | `6.PEMAKAIAN (COM)` | Identik label file produksi |
+| Skema tabel | Tetap 7 kolom (KATEGORI, KODE BARANG, NAMA BARANG, JENIS, SATUAN, Attribute, Value) | Baris long konsisten dengan 8 jenis mentah; field list pivot tidak bertambah |
+| Rantai | Per NAMA BARANG urut Attribute; hari pertama = STOK AWAL (pola `SOKemarinList` F_Deviasi) | Konsisten penuh dengan rantai SO_KEMARIN yang sudah tervalidasi → baris `Attribute=null` sudah dibuang (v5) → bug null-hari lama otomatis tidak ikut; identitas aljabar (6.2) terjaga |
+| Domain rantai | Baris non-REWORK dari `F_HasilSO` (item berkode) | Konsisten dengan domain rantai `F_Deviasi` |
+| Buffer | `Base = Table.Buffer(Typed)` | Single-pass: rantai COM mengenumerasi tabel 2× (List.Distinct + Table.Pivot) + Combine 1× — pola fix v3 |
+| KETERANGAN | Tidak ditambah sebagai kolom | Rumus terdokumentasi di komentar M + panduan; skema tetap bersih (bisa ditambah cepat bila diminta) |
+
+Catatan semantik vs query produksi: pipeline produksi belum membuang
+baris `Attribute=null` sebelum rantai — bila ada, rantai produksi bergeser
+(kasus yang sama dengan bug hari-1 file sampel lama). Versi migrasi memakai
+semantik terbetulkan (hari-1 = STOK AWAL), konsisten dengan keputusan
+bug-fix `F_Deviasi` (Lampiran 1); mode legacy tersedia bila diminta angka
+persis-lama.
+
+### 6.2 Identitas pembantu (alat validasi)
+
+`F_Deviasi`: STOK SEHARUSNYA = SO_KEMARIN + BM − BK − **BOM**;
+1.DEVIASI = SO − STOK SEHARUSNYA. COM (produksi) = SO_KEMARIN + BM − BK − SO
+(tanpa −BOM). Maka:
+
+**COM = BOM − 1.DEVIASI** (jika BOM = 0 → COM = −1.DEVIASI).
+
+Identitas ini memungkinkan pengecekan COM **langsung ke cache1 — angka
+asli file sampel** (bukan hanya ke rekonstruksi), karena cache1 memuat
+kolom BOM + Value(1.DEVIASI) per item/hari.
+
+### 6.3 Validasi v6 (`so-surgery/updates/validate_fhasilso.py`, CEK A–E, 25 cek LULUS)
+
+| Pemeriksaan | Hasil |
+|---|---|
+| A. Paritas SO v6 == v4 (angka 8 jenis mentah tidak berubah) | **PASS — 0 mismatch** |
+| B. 8 JENIS sumber == sharedItems cache3 | PASS |
+| C. 37.169 sel nilai (1.199 baris × 31 hari) 1:1 vs cache3 | **PASS — 100% persis** (v5 tetap) |
+| E0. Satu SATUAN per (item, hari) — rantai well-defined | PASS |
+| E1. Domain COM day-complete 1..31 (101 item berkode) | PASS — **3.131 baris COM** (101 × 31) |
+| **E2. Identitas COM == BOM − 1.DEVIASI vs cache1 (angka asli sampel)** | **PASS — 3.091 persis + 9 known-fix hari-1, 0 anomali** |
+| E3. Baris COM tanpa pasangan cache1 = hanya MENU MIX (GORENG MEKAR) | PASS (31 baris; cache1 memang mengecualikan MENU MIX) |
+| E4. Anchor struktur M: buffer, pivot+List.Sum, SOKemarinList, unpivot, combine, filter REWORK | PASS (6 anchor) |
+| D. Diff vs git HEAD: hanya blok F_HasilSO yang berubah | PASS (43 query byte-identical) |
+| Struktur workbook (rebuild + `so-surgery/validate.py`) | **65/65 LULUS** |
+
+9 known-fix hari-1 = item bug lama (SO_KEMARIN lama = 0) yang memang
+dikoreksi — di COM tampak sebagai COM lama-implied vs COM baru, contoh:
+`CUP 16 - BAKSO` −5.843 → −115; `CUP SUNDAE - BAKSO` −4.575 → +1.053;
+`RICE WRAP` 0 → +1.500; `SENDOK TEH SUNDAE (V.030)` −14.668 → +872
+(= 15.540 stok awal + BM − BK − SO). Selisih 9 baris ini = **koreksi
+disengaja**, bukan anomali. (Contoh silang: 904 di sana = BOM SENDOK TEH
+SUNDAE hari-1 → COM = BOM − 1.DEVIASI = 904 − 32 = 872 ✓.)
+
+### 6.4 Cara pakai
+
+Pivot PIVOT HASIL SO: `F_HasilSO[JENIS]` di FILTERS → pilih
+**`6.PEMAKAIAN (COM)`** (di samping 8 jenis mentah). Nilai = pemakaian
+harian per item (kolom Attribute 1..31). Tanpa measure apa pun — tetap
+Sum of Value, storage engine murni.

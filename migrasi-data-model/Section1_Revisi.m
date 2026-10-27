@@ -764,12 +764,24 @@ shared F_HasilSO = let
     //     (report field "JENIS = SO", bisa diganti interaktif ke jenis
     //     lain), bukan di query — jadi kolom JENIS wajib ikut.
     //   - buang Attribute=null (baris BOM menu-trial tanpa hari)
+    //   - v6 TAMBAH: baris hitung "6.PEMAKAIAN (COM)" — replika rumus
+    //     query produksi:
+    //       pemakaian(i) = (i=0 ? STOK AWAL : SO hari sebelumnya)
+    //                      + BARANG MASUK - BARANG KELUAR - SO hari ini,
+    //     dirantai per NAMA BARANG urut Attribute — pola & semantik
+    //     PERSIS rantai SO_KEMARIN di F_Deviasi, jadi bug null-hari
+    //     lama tidak ikut (baris Attribute=null sudah dibuang di atas;
+    //     hari-1 memakai STOK AWAL). Identitas pembantu: COM = BOM -
+    //     1.DEVIASI (Stock Seharusnya versi F_Deviasi memakai -BOM);
+    //     jika BOM = 0 maka COM = -(1.DEVIASI). Divalidasi otomatis
+    //     vs cache pivot lama di so-surgery/updates/validate_fhasilso.py.
     // Domain identik dengan pivot lama: item berkode (mencakup
     // GORENG MEKAR / kategori MENU MIX, tanpa KUAH BAKSO yang sudah
     // difilter di Raw Rekap Mentah).
     // CARA PAKAI PIVOT (detail di PANDUAN-MIGRASI Langkah 5):
     //   FILTERS: F_HasilSO[JENIS] = SO (default; boleh ganti — sama
-    //            seperti dropdown "JENIS" di pivot sampel)
+    //            seperti dropdown "JENIS" di pivot sampel; pilih
+    //            "6.PEMAKAIAN (COM)" untuk hasil hitung COM)
     //   ROWS    : KODE BARANG > NAMA BARANG > SATUAN
     //   COLUMNS : Attribute     VALUES: Sum of Value
     // ⚠️ Tanpa filter JENIS, Sum of Value menjumlahkan SEMUA jenis
@@ -814,9 +826,114 @@ shared F_HasilSO = let
             {"Attribute", Int64.Type},
             {"Value", type number}
         }
-    )
+    ),
+    // 🔥 OPTIMASI SINGLE-PASS (fokus kecepatan): rantai COM di bawah
+    // mengenumerasi tabel ini 2x (List.Distinct utk daftar JENIS +
+    // pemindaian Table.Pivot) dan Table.Combine 1x lagi. Tanpa buffer,
+    // pipeline join+filter+type dievaluasi ulang hingga 3x per refresh
+    // (pola sama dgn fix v3 di F_Deviasi).
+    Base = Table.Buffer(Typed),
+
+    // ---------------------------------------------------------
+    // BARIS HITUNG 6.PEMAKAIAN (COM) — replika rumus produksi:
+    //   COM = SO_KEMARIN + BARANG MASUK - BARANG KELUAR - SO
+    // Domain rantai = baris non-REWORK (konsisten dgn F_Deviasi);
+    // JENIS lain (BOM/WASTE/SUSUT/TRIAL) ikut dipivot agar domain
+    // baris wide = semua hari aktif — persis rantai F_Deviasi,
+    // sehingga identitas COM = BOM - 1.DEVIASI selalu berlaku.
+    // ---------------------------------------------------------
+    ComInput = Table.SelectRows(Base, each [JENIS] <> "REWORK"),
+    ComPivotValues = List.Distinct(ComInput[JENIS]),
+    ComPivoted = Table.Pivot(
+        ComInput,
+        ComPivotValues,
+        "JENIS",
+        "Value",
+        List.Sum
+    ),
+    ComGrouped = Table.Group(
+        ComPivoted,
+        {"NAMA BARANG"},
+        {
+            {
+                "Data",
+                (t) =>
+                    let
+                        SortedT = Table.Sort(
+                            t,
+                            {{"Attribute", Order.Ascending}}
+                        ),
+                        BufferedT = Table.Buffer(SortedT),
+                        RowCount = Table.RowCount(BufferedT),
+                        GetListSafe = (col as text) as list =>
+                            if Table.HasColumns(BufferedT, col)
+                            then List.Transform(Table.Column(BufferedT, col), each if _ = null then 0 else _)
+                            else List.Repeat({0}, RowCount),
+                        SOList = GetListSafe("SO"),
+                        AwalList = GetListSafe("STOCK AWAL"),
+                        MasukList = GetListSafe("BARANG MASUK"),
+                        KeluarList = GetListSafe("BARANG KELUAR"),
+                        StockAwal1 = if List.IsEmpty(AwalList) then 0 else AwalList{0},
+                        SOKemarinList = List.FirstN({StockAwal1} & SOList, RowCount),
+                        ComList = List.Transform(
+                            List.Numbers(0, RowCount),
+                            each SOKemarinList{_} + MasukList{_} - KeluarList{_} - SOList{_}
+                        ),
+                        Output = Table.FromColumns(
+                            Table.ToColumns(BufferedT) & {ComList},
+                            Table.ColumnNames(BufferedT) & {"6.PEMAKAIAN (COM)"}
+                        )
+                    in
+                        Output
+            }
+        }
+    ),
+    ComWide = Table.Combine(ComGrouped[Data]),
+    ComSelected = Table.SelectColumns(
+        ComWide,
+        {
+            "KATEGORI",
+            "KODE BARANG",
+            "NAMA BARANG",
+            "SATUAN",
+            "Attribute",
+            "6.PEMAKAIAN (COM)"
+        }
+    ),
+    // Unpivot kolom COM -> baris JENIS="6.PEMAKAIAN (COM)" bersistema
+    // sama dgn 8 jenis mentah (tabel tetap LONG, skema 7 kolom).
+    ComTall = Table.Unpivot(
+        ComSelected,
+        {"6.PEMAKAIAN (COM)"},
+        "JENIS",
+        "Value"
+    ),
+    ComRows = Table.TransformColumnTypes(
+        Table.ReorderColumns(
+            ComTall,
+            {
+                "KATEGORI",
+                "KODE BARANG",
+                "NAMA BARANG",
+                "JENIS",
+                "SATUAN",
+                "Attribute",
+                "Value"
+            }
+        ),
+        {
+            {"KATEGORI", type text},
+            {"KODE BARANG", type text},
+            {"NAMA BARANG", type text},
+            {"JENIS", type text},
+            {"SATUAN", type text},
+            {"Attribute", Int64.Type},
+            {"Value", type number}
+        }
+    ),
+    Combined = Table.Combine({Base, ComRows})
 in
-    Typed;
+    Combined;
 
 shared Metric = let
     // =============================================================

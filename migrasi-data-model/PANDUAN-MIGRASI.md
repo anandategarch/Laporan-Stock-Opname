@@ -1,7 +1,25 @@
 # PANDUAN MIGRASI — Perhitungan Berat ke Data Model
 ## Laporan Stock Opname (Full Power Query → Power Query + DAX)
 
-> **📦 STATUS FILE (UPDATE v5 — PIVOT HASIL SO: PARITAS FILTER "JENIS"):**
+> **📦 STATUS FILE (UPDATE v6 — PIVOT HASIL SO: + PERHITUNGAN COM):**
+> file xlsx di repo ini SUDAH DIREVISI LANGSUNG.
+> Pembaruan v6: `F_HasilSO` kini juga MEMBUAT baris hitung
+> **`6.PEMAKAIAN (COM)`** — replika rumus query produksi:
+> *pemakaian = (SO kemarin | STOK AWAL untuk hari-1) + Barang Masuk −
+> Barang Keluar − SO hari ini*, dirantai per item urut hari (pola sama
+> dengan rantai SO_KEMARIN `F_Deviasi` — hari-1 memakai STOK AWAL, bug
+> null-hari lama tidak ikut). Pilih `6.PEMAKAIAN (COM)` di filter
+> `F_HasilSO[JENIS]` pivot untuk menampilkannya. **8 JENIS mentah tidak
+> berubah** (37.169 sel nilai tetap 100% persis vs cache lama).
+> Validasi v6: 3.131 baris COM (101 item berkode × 31 hari); identitas
+> aljabar **COM = BOM − 1.DEVIASI** dicek LANGSUNG ke angka asli cache
+> CEK DEVIASI lama: **3.091 cocok persis + 9 known-fix hari-1** (koreksi
+> bug lama yang sama seperti `F_Deviasi`), 0 anomali
+> (`so-surgery/updates/validate_fhasilso.py` CEK A–E). Struktur workbook
+> **65/65 LULUS**. File Anda sudah termigrasi? Ikuti "UPGRADE" Sub-B
+> (paste ulang `F_HasilSO`, ± 3 menit).
+>
+> **📦 (UPDATE v5 — PIVOT HASIL SO: PARITAS FILTER "JENIS"):**
 > file xlsx di repo ini SUDAH DIREVISI LANGSUNG.
 > Pembaruan v5: `F_HasilSO` kini memuat **SEMUA 8 JENIS** (SO, STOCK AWAL,
 > BARANG MASUK, BARANG KELUAR, BOM, WASTE, SUSUT, TRIAL) **plus kolom
@@ -56,7 +74,9 @@
 > **Riwayat pembaruan:** v1 migrasi awal (hapus 3 query output, tanam 3 tabel Data
 > Model) · v2 `F_Deviasi` 18 kolom (paritas double-click) · v3 `Table.Buffer`
 > single-pass (kecepatan, angka identik) · v4 panel query 6 folder bernomor ·
-> **v5 `F_HasilSO` semua 8 JENIS + kolom JENIS (paritas dropdown "JENIS")**.
+> v5 `F_HasilSO` semua 8 JENIS + kolom JENIS (paritas dropdown "JENIS") ·
+> **v6 `F_HasilSO` + baris hitung `6.PEMAKAIAN (COM)` (rumus produksi,
+> tervalidasi vs cache lama)**.
 > Sudah termigrasi pakai panduan v1–v4? Tidak perlu download ulang — cukup ikuti
 > bagian "UPGRADE FILE YANG SUDAH TERMIGRASI (± 10 MENIT)".
 
@@ -70,7 +90,7 @@
 | 2 | `RFC_Rekap Mentah [CEK DEVIASI] Akumulasi` | ❌ HAPUS (running total = 1 measure DAX) |
 | 3 | `Raw Rekap Mentah [FINAL] PIVOT HASIL SO` | ❌ HAPUS (diganti `F_HasilSO`) |
 | 4 | `F_Deviasi` | ➕ BARU — fakta 18 kolom (CEK DEVIASI & AKUMULASI, drillthrough = sampel) |
-| 5 | `F_HasilSO` | ➕ BARU — fakta PIVOT HASIL SO: **semua 8 JENIS + kolom `JENIS`**; filter jenis ada **di pivot** (FILTERS, default SO) — persis sampel (v5) |
+| 5 | `F_HasilSO` | ➕ BARU — fakta PIVOT HASIL SO: **semua 8 JENIS + kolom `JENIS` + baris hitung `6.PEMAKAIAN (COM)` (v6)**; filter jenis ada **di pivot** (FILTERS, default SO) — persis sampel (v5) |
 | 6 | `Metric` | ➕ BARU — dimensi 5 metrik (kini **opsional** — `F_Deviasi[JENIS]` sudah memuat label metrik) |
 | 7 | `Raw Rekap Mentah` | ⚪ TETAP connection-only (tidak ke model) |
 | 8 | `RFC_Kode Barang` | ⚪ TETAP connection-only (dipakai `F_HasilSO`) |
@@ -201,6 +221,9 @@ Untuk tiap sheet: buka sheet lama, hapus isi area pivot lama, lalu
 - FILTERS: `F_HasilSO[JENIS]` = **SO** — persis dropdown "JENIS" di file
   sampel (sel A1/B1 sheet lama). Boleh diganti ke jenis lain (STOCK AWAL,
   BARANG MASUK, dst.) — angka mengikuti, 100% storage engine (cepat).
+  Termasuk **`6.PEMAKAIAN (COM)`** (v6): pemakaian harian = SO kemarin +
+  Barang Masuk − Barang Keluar − SO hari ini (hari-1 memakai STOK AWAL) —
+  sudah dihitung di query, tinggal pilih di filter/slicer.
   Alternatif tampilan: taruh `JENIS` di **Slicer**.
 - ROWS:    `F_HasilSO[KODE BARANG]` → `F_HasilSO[NAMA BARANG]` → `F_HasilSO[SATUAN]`
 - COLUMNS: `F_HasilSO[Attribute]`
@@ -215,6 +238,10 @@ Untuk tiap sheet: buka sheet lama, hapus isi area pivot lama, lalu
    - `SENDOK TEH SUNDA` 1.DEVIASI hari 3 = **817**
    - `LPG 12KG` SO hari 1–3 = sesuai REKAP MENTAH
    - PIVOT HASIL SO `GORENG MEKAR` hari 1 = 272, dst.
+   - Ganti filter `JENIS` ke **`6.PEMAKAIAN (COM)`** → cek silang cepat:
+     `RICE WRAP` hari 1 = **1.500** (stok awal 1.500, SO/BM/BK = 0);
+     `SENDOK TEH SUNDAE (V.030)` hari 1 = **872** (15.540 stok awal + BM −
+     BK − SO, identik BOM − 1.DEVIASI = 904 − 32).
 3. **Tes double-click**: klik sel mana pun di CEK DEVIASI HARIAN (mis. satu item ×
    hari 5) → sheet detail menampilkan 18 kolom persis daftar di atas. Sel daun
    (item × hari × metrik) = 1 baris; subtotal item = ± 5–160 baris.
@@ -237,7 +264,9 @@ lewat Advanced Editor:
 - **Sub-A `F_Deviasi`** — WAJIB bila masih versi v1 (tanpa 18 kolom / tanpa
   `Table.Buffer` single-pass v3).
 - **Sub-B `F_HasilSO`** — WAJIB bila masih versi v1–v4 (tabel SO-only): ini
-  pembaruan **v5** (semua 8 JENIS + kolom `JENIS`).
+  pembaruan **v5** (semua 8 JENIS + kolom `JENIS`) sekaligus **v6** (baris
+  hitung `6.PEMAKAIAN (COM)`). Bila file Anda sudah v5 dan hanya ingin
+  menambah COM — tetap paste ulang Sub-B ini (satu blok yang sama).
 
 ### Sub-A — Ganti `F_Deviasi` (lewati bila sudah v3+)
 
@@ -257,14 +286,16 @@ lewat Advanced Editor:
    kolom-kolom baru; kolom lama (`KATEGORI`, `NAMA BARANG`, `JENIS`, `SATUAN`,
    `Attribute`, `Value`) tetap — tidak ada yang putus.
 
-### Sub-B — Ganti `F_HasilSO` (v5 — paritas filter "JENIS" pivot sampel)
+### Sub-B — Ganti `F_HasilSO` (v6 — paritas filter "JENIS" + baris hitung COM)
 
 4. **Data → Queries & Connections** → klik kanan **`F_HasilSO`** → **Edit…** →
    **Advanced Editor** → select semua → paste kode `F_HasilSO` terbaru dari
-   `Section1_Revisi.m` (mulai `let` sampai `in\n    Typed`) → **OK**.
-   → Preview: kini ada kolom **JENIS** dan baris BUKAN-SO ikut ter-load
+   `Section1_Revisi.m` (mulai `let` sampai `in\n    Combined`) → **OK**.
+   → Preview: kini ada kolom **JENIS**, baris BUKAN-SO ikut ter-load
    (8 jenis: SO, STOCK AWAL, BARANG MASUK, BARANG KELUAR, BOM, WASTE,
-   SUSUT, TRIAL). → **Close & Load** (tujuan load tidak berubah).
+   SUSUT, TRIAL), **plus baris `JENIS = "6.PEMAKAIAN (COM)"`** hasil
+   hitung COM (3.131 baris di data sampel). → **Close & Load** (tujuan
+   load tidak berubah).
 5. **Data → Refresh All** (2×).
 
 ### Sub-C — Rapikan pivot (setelah refresh Sub-A/B)
@@ -311,6 +342,7 @@ lewat Advanced Editor:
 | 6 | Double-click CEK DEVIASI HARIAN | 18 kolom | **18 kolom identik** (paritas v2) |
 | 7 | Double-click AKUMULASI | 18 kolom + kolom `AKUMULASI` | 18 kolom (kolom `Value` = nilai harian, bukan running total; angka running total tetap benar di sel pivot via measure) |
 | 8 | Baris detail | termasuk 70 baris `(blank)` bug | tanpa baris null (bersih) |
+| 9 | Metrik COM di PIVOT HASIL SO | tidak ada di file sampel (hanya di file produksi user) | **BARU (v6)**: nilai JENIS `6.PEMAKAIAN (COM)` — pilih di FILTERS/Slicer `F_HasilSO[JENIS]`; COM = SO kemarin + BM − BK − SO (hari-1 = STOK AWAL); identitas cek: COM = BOM − 1.DEVIASI |
 
 ## PANEN OPTIMASI
 
@@ -370,6 +402,12 @@ tetap di M:**
   BAKSO) + buang `Attribute=null`. Measure memang tak bisa mengubah domain
   BARIS pivot, tapi slice satu kolom (JENIS=SO) tidak butuh measure — cukup
   field filter di pivot.
+- **COM (`6.PEMAKAIAN (COM)`) mengikuti garis yang sama (v6):** nilainya
+  snapshot historis + rantai antar-baris (pola identik SO_KEMARIN) →
+  materialisasi di M saat refresh; muncul sebagai nilai `JENIS` sehingga
+  pemilihannya tetap storage engine murni. Cek silang otomatis ke angka
+  asli cache lama lewat identitas COM = BOM − 1.DEVIASI: 3.091 cocok
+  persis + 9 known-fix hari-1 (LAPORAN-VALIDASI Lampiran 6).
 
 **Yang memang pindah ke model: hanya [Akumulasi]** — running total
 bergantung konteks (kolom pivot = hari berjalan). Di M ia butuh

@@ -48,17 +48,23 @@ RETURN
     )
 
 // ============================================================
-// 2. PIVOT HASIL SO — tidak perlu measure (v5)
+// 2. PIVOT HASIL SO — tidak perlu measure (v5+v6)
 //    FILTERS : F_HasilSO[JENIS] = "SO"   ← WAJIB, default (persis
 //              dropdown "JENIS" pivot sampel; boleh diganti jenis
 //              lain — STOCK AWAL, BARANG MASUK, dst.)
+//              Nilai JENIS yang tersedia = 8 jenis mentah
+//              (SO, STOCK AWAL, BARANG MASUK, BARANG KELUAR, BOM,
+//              WASTE, SUSUT, TRIAL) + "6.PEMAKAIAN (COM)" (v6 —
+//              pemakaian harian = SO kemarin + Barang Masuk −
+//              Barang Keluar − SO hari ini; hari-1 memakai STOK
+//              AWAL; sudah dihitung di query, tinggal dipilih).
 //    ROWS    : F_HasilSO[KODE BARANG] > [NAMA BARANG] > [SATUAN]
 //    COLUMNS : F_HasilSO[Attribute]
 //    VALUES  : Sum of F_HasilSO[Value]
-//    ⚠️ Tabel sengaja memuat SEMUA 8 JENIS + kolom JENIS (v5) agar
-//    filter bisa diganti-ganti interaktif, sama seperti file sampel.
-//    Tanpa filter JENIS, Sum menjumlahkan SEMUA jenis sekaligus
-//    (SO+MASUK+KELUAR+...) — tidak bermakna.
+//    ⚠️ Tabel sengaja memuat SEMUA 8 JENIS + baris COM + kolom JENIS
+//    (v5/v6) agar filter bisa diganti-ganti interaktif, sama seperti
+//    file sampel. Tanpa filter JENIS, Sum menjumlahkan SEMUA jenis
+//    sekaligus (SO+MASUK+KELUAR+...) — tidak bermakna.
 // ============================================================
 
 // ============================================================
