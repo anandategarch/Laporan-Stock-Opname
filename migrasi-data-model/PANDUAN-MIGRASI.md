@@ -1,9 +1,19 @@
 # PANDUAN MIGRASI — Perhitungan Berat ke Data Model
 ## Laporan Stock Opname (Full Power Query → Power Query + DAX)
 
-> **📦 STATUS FILE (UPDATE v3 — PARITAS DOUBLE-CLICK + OPTIMASI SINGLE-PASS):
-> file xlsx di repo ini SUDAH DIREVISI LANGSUNG.** Pembaruan v2: `F_Deviasi` kini
-> ber-**18 kolom**
+> **📦 STATUS FILE (UPDATE v4 — PANEL QUERY DIRAPIKAN: 11 GRUP ACAK → 6 GRUP BERNOMOR):**
+> file xlsx di repo ini SUDAH DIREVISI LANGSUNG.
+> Pembaruan v4: seluruh **44 query dipindah ke 6 folder bernomor** di panel
+> Queries & Connections (lihat seksi "STRUKTUR PANEL QUERY (v4)" di bawah),
+> folder kosong `INPUT` dan 4 folder sisa (TRIAL/WASTE/SUSUT/DATABASE MENU) dihapus,
+> dan 3 query yang tadinya *menggantung tanpa folder* (`RFC_Database_Susut`,
+> `RFC_Database_Trial`, `RFC_Database_Waste_BnP`) kini masuk folder `2. TEMPLATE INPUT`.
+> **Audit dependency: 44/44 query masih dipakai** — 3 query yang memang tidak
+> dibutuhkan sudah dihapus pada v1 (lihat tabel RINGKASAN), sisanya wajib ada
+> (13 pengisi template sheet input, 10 fungsi, 24 pipeline + output). M (Section1.m)
+> **tidak berubah satu byte** dari v3.
+>
+> **Pembaruan v2: `F_Deviasi` kini ber-18 kolom**
 > (replika persis output query lama `RFC_Rekap Mentah [CEK DEVIASI] Raw`), sehingga
 > **double-click / Show Details di pivot CEK DEVIASI HARIAN menampilkan 18 kolom
 > yang sama persis dengan file sampel** — KATEGORI, NAMA BARANG, JENIS, SATUAN,
@@ -18,27 +28,21 @@
 > (1 measure saja!), Langkah 5 (bangun 3 pivot), Langkah 6 (refresh & validasi)**
 > — total ± 15 menit klik-klik UI. (Model Data / measure DAX tidak bisa disuntik
 > dari luar Excel — format `model.item` bersifat proprietary.)
-> Verifikasi struktur file pasca-revisi: **53/53 pemeriksaan otomatis LULUS**
+> Verifikasi struktur file pasca-revisi: **65/65 pemeriksaan otomatis LULUS**
 > (ZIP/CRC, rels graph, content-types, metadata PQ, konsistensi koneksi↔query,
-> Section1.m byte-exact).
->
-> **⚡ Pembaruan v3 (fokus kecepatan, tanpa perubahan angka):** langkah
-> `Table.Buffer(#"Removed Columns")` ditambahkan SEBELUM `Table.Pivot` di
-> `F_Deviasi`. Alasan: `Table.Pivot` meng-enumerate tabel 2× (List.Distinct
-> untuk daftar JENIS + scan data) — tanpa buffer, M dapat mengevaluasi ulang
-> seluruh rantai upstream `Raw Rekap Mentah` (gabungan 8 sumber + join +
-> konversi + group) **dua kali per refresh**. Buffer ± 16 ribu baris menjamin
-> evaluasi 1× saja. Validasi ulang: hasil CEK1–4 identik byte-per-byte (15.765
-> + 45 known-fix + 0 anomali) — angka tidak berubah sama sekali.
->
-> **⚡ SUDAH TERMIGRASI PAKAI PANDUAN v1? Jangan download ulang — lihat bagian
-> "UPGRADE FILE YANG SUDAH TERMIGRASI (± 10 MENIT)" di bawah.**
+> Section1.m byte-exact, blob QueryGroups 6 grup, 44/44 query ber-grup).
 >
 > **Status validasi angka: LULUS 100%** — 15.765/15.810 baris CEK DEVIASI,
 > 15.252/15.810 AKUMULASI, 1.199/1.199 PIVOT HASIL SO, dan seluruh teks
 > Keterangan/Indikasi cocok persis dengan cache pivot lama. Sisa selisih =
 > **45 + 558 + 14 sel *known-fix*** = koreksi bug lama hari-1 (detail di
 > `LAPORAN-VALIDASI.md`, bukan masalah baru).
+>
+> **Riwayat pembaruan:** v1 migrasi awal (hapus 3 query output, tanam 3 tabel Data
+> Model) · v2 `F_Deviasi` 18 kolom (paritas double-click) · v3 `Table.Buffer`
+> single-pass (kecepatan, angka identik) · **v4 panel query 6 folder bernomor**.
+> Sudah termigrasi pakai panduan v1–v3? Tidak perlu download ulang — cukup ikuti
+> bagian "UPGRADE FILE YANG SUDAH TERMIGRASI (± 10 MENIT)".
 
 ---
 
@@ -58,6 +62,36 @@
 | 10 | Semua `SRC/STG/IPT/RFC_*/fn_*` lain | ⚪ TIDAK DISENTUH (byte-identical) |
 
 **Tidak perlu relasi apa pun di Power Pivot.** Model = 2–3 tabel berdiri sendiri.
+
+---
+
+## STRUKTUR PANEL QUERY (v4 — 6 FOLDER BERNOMOR)
+
+Panel **Data → Queries & Connections** kini tertata mengikuti alur data — buka file,
+dan panel kanan menampilkan:
+
+| Folder | Isi | Fungsi |
+|---|---|---|
+| **📁 1. MASTER & CONFIG** (2) | `SRC_AllSources`, `CFG_InputHarian` | Hub seluruh data master (Database Konversi, BOM, menu, mapping) + konfigurasi kolom input harian |
+| **📁 2. TEMPLATE INPUT** (13) | 5× `RFC_Database Menu …`, 4× `RFC_Nama Item …`, `RFC_Kode Barang`, `RFC_Database_Susut/Trial/Waste_BnP` | Menulis ulang daftar item/menu di sheet input saat refresh (jangan dihapus — tanpa ini sheet input tidak ter-update) |
+| **📁 3. STAGING (UNPIVOT)** (7) | 7× `STG_*_Unpivot` | Ubentuk kolom hari 1..31 menjadi baris (NAMA BARANG, Attribute, Qty) |
+| **📁 4. TRANSFORM (IPT)** (7) | 7× `IPT_*` | Konversi satuan → gr, join LINK/konversi, group + label JENIS |
+| **📁 5. OUTPUT** (5) | `Raw Rekap Mentah`, `Raw Rekap Mentah [FINAL]`, `F_Deviasi`, `F_HasilSO`, `Metric` | Sheet REKAP MENTAH + 3 tabel Data Model untuk pivot baru |
+| **📁 6. FUNCTION** (10) | 10× `fn*` | Fungsi bantu yang dipanggil query lain (tidak perlu dibuka) |
+
+Pemetaan folder lama → baru: `CONFIG`→**1**; `DATABASE SO` + `DATABASE MENU` + 3 query root→**2**; `STG`→**3**;
+`SO` + `SUSUT` + `TRIAL` + `WASTE`→**4**; `REKAP MENTAH`→**5**; `Function`→**6**;
+folder kosong `INPUT` dihapus.
+
+> **Kenapa tidak ada query yang dihapus lagi di v4?** Audit dependency membuktikan
+> ke-44 query yang tersisa semuanya dipakai: 13 `RFC_*` mengisi template sheet input
+> (FillEnabled), 10 `fn*` dipanggil query lain, 7 `STG_*` + 7 `IPT_*` + `Raw Rekap
+> Mentah` + `RFC_Kode Barang` + `SRC_AllSources` + `CFG_InputHarian` direferensikan
+> query lain di rantai M, dan 5 output punya tujuan load. **Menghapus salah satunya
+> = rantai refresh putus / sheet input berhenti ter-update.** Tiga query yang memang
+> sudah tidak dibutuhkan (`[CEK DEVIASI] Raw`, `[CEK DEVIASI] Akumulasi`,
+> `[FINAL] PIVOT HASIL SO`) telah dihapus sejak v1 — itulah satu-satunya query yang
+> aman dibuang. Bukti audit per query ada di `LAPORAN-VALIDASI.md` Lampiran 4.
 
 ---
 

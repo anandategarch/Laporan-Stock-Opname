@@ -223,3 +223,75 @@ persis dengan hasil v2, tanpa satu angka pun berubah**:
 Sifat `Table.Buffer`: mematerialkan isi tabel di memori sekali per evaluasi —
 urutan baris, urutan kolom, dan nilai TIDAK berubah; hanya pola enumerasi
 yang berubah. Itulah sebabnya seluruh angka validasi tetap identik.
+
+---
+
+## LAMPIRAN 4 — v4: AUDIT KEBUTUHAN 44 QUERY + REGRUPING PANEL (6 FOLDER)
+
+Permintaan: *"Query yang gak dibutuhkan langsung aja hapus dari file sampel, dan
+query-nya dibuat grup biar mudah dibaca."*
+
+### 4.1 Hasil audit — tidak ada lagi query yang aman dihapus
+
+Graf dependensi seluruh 44 query di `Section1_Revisi.m` di-parse ulang (referensi
+antar-query: bentuk `#"...multi kata..."` dan identifier telanjang), lalu
+disandingkan dengan target pemuatan di metadata (`FillEnabled`, `FillTarget`,
+`FillToDataModelEnabled`, `FillObjectType`):
+
+| Kelas | Jumlah | Bukti dipakai |
+|---|---|---|
+| Pengisi template sheet input (`RFC_*`) | 13 | `FillEnabled=l1` + `FillTarget` (SUSUT, TRIAL, 5 sheet menu, 4 sheet nama item, WASTE BnP) — meregenerasi daftar item/menu di sheet input saat refresh; tanpa ini sheet input beku |
+| Fungsi bantu (`fn*`) | 10 | dipanggil query lain: `fnSafeNumber`←`fnUnpivotDailyStandard`, `fnUnpivotTrialSusut`←`STG_Susut/Trial`, `fnBreakdownUnified`←`STG_AllBreakdown`+`F_Deviasi`, dst. |
+| Intermediate pipeline (`STG_*`, `IPT_*`, `Raw Rekap Mentah`, `RFC_Kode Barang`, `SRC_AllSources`, `CFG_InputHarian`) | 24 | semuanya direferensikan minimal 1 query lain dalam M (0 orphan) |
+| Output (load ke sheet/model) | 5 | `[FINAL]`→sheet REKAP MENTAH; `F_Deviasi`/`F_HasilSO`/`Metric`→Data Model |
+| **Total** | **44** | **44/44 dipakai → 0 query dihapus di v4** |
+
+Tiga query yang memang sudah tidak dibutuhkan — `RFC_Rekap Mentah [CEK DEVIASI]
+Raw`, `[CEK DEVIASI] Akumulasi`, `[FINAL] PIVOT HASIL SO` — **sudah dihapus
+sejak revisi v1** (bagian migrasi Data Model), jadi file saat ini memang sudah
+bersih dari query mati. Menghapus 44 yang tersisa akan memutus rantai refresh
+atau membekukan sheet input.
+
+### 4.2 Temuan struktur panel lama (11 folder — sulit dibaca)
+
+Blob biner `QueryGroups` di `customXml/item5.xml` (LocalPackageMetadataFile)
+didekode — formatnya: `[int64 jumlah][GUID 16B][len 1B][nama]` per record
+dipisah `[00 00][int64 NN]`. Isi file lama: folder `STG`(7), `SO`(4),
+`TRIAL`(1), `WASTE`(1), `SUSUT`(1), **`INPUT` — KOSONG, 0 anggota**,
+`DATABASE MENU`(5), `DATABASE SO`(5), `REKAP MENTAH`(5), `Function`(10),
+`CONFIG`(2), **plus 3 query tanpa folder sama sekali**
+(`RFC_Database_Susut/Trial/Waste_BnP`) — inilah yang membuat panel tampak
+berantakan dan terkesan ada query "sampah".
+
+### 4.3 Struktur baru — 6 folder bernomor mengikuti alur data
+
+| # | Folder baru | GUID (reuse) | Member | Dari folder lama |
+|---|---|---|---|---|
+| 1 | `1. MASTER & CONFIG` | f749f097 (CONFIG) | 2 | CONFIG |
+| 2 | `2. TEMPLATE INPUT` | cb7847cd (DATABASE SO) | 13 | DATABASE SO + DATABASE MENU + 3 root yatim |
+| 3 | `3. STAGING (UNPIVOT)` | 55b371f9 (STG) | 7 | STG |
+| 4 | `4. TRANSFORM (IPT)` | 7e851d46 (SO) | 7 | SO + SUSUT + TRIAL + WASTE |
+| 5 | `5. OUTPUT` | 53168195 (REKAP MENTAH) | 5 | REKAP MENTAH |
+| 6 | `6. FUNCTION` | 23687609 (Function) | 10 | Function |
+| — | *dihapus* | — | — | INPUT (kosong), TRIAL, WASTE, SUSUT, DATABASE MENU |
+
+2+13+7+7+5+10 = **44 — semua query ber-grup, 0 yatim, 0 folder kosong.**
+GUID folder sengaja **di-reuse** sehingga 36 query yang grupnya tidak berubah
+tidak perlu disentuh; hanya 8 query yang dipindah GID + 3 query root yang
+disisipkan `<Entry Type="QueryGroupID">` pertamanya.
+
+### 4.4 Validasi v4 (semua otomatis, `so-surgery/validate.py`)
+
+| Pemeriksaan | Hasil |
+|---|---|
+| Blob QueryGroups: header=6, 6 record utuh 0 byte sisa, GUID+nama = desain, separator NN=0..5 | PASS |
+| 44 query-level item metadata; semua punya QueryGroupID; 0 menunjuk grup lama (DATABASE MENU/SUSUT/TRIAL/WASTE/INPUT) | PASS |
+| Member per folder 2/13/7/7/5/10; nama query metadata ≡ M ≡ koneksi (44/44/44) | PASS |
+| 3 eks-root query masuk folder 2 | PASS |
+| **Section1.m (M) byte-exact == v3** — tidak ada logika/angka yang berubah | PASS |
+| Seluruh cek struktur v1–v3 (ZIP/CRC, XML, rels, content-types, koneksi, sheet) | PASS — **65/65 LULUS, 0 FAIL** |
+
+Karena M tidak berubah, seluruh angka validasi Lampiran 1–3 berlaku identik
+(15.765 + 45 known-fix + 0 anomali; AKUMULASI 15.252 + 558; PIVOT HASIL SO
+1.199/1.199). Perubahan v4 murni kosmetik pada metadata panel — bukan pada
+perhitungan.
