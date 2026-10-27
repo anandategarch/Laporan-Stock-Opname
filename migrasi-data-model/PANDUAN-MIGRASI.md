@@ -271,6 +271,64 @@ Pakai bagian ini bila file kerja Anda **sudah** termigrasi dengan panduan v1
   melekat di baris untuk drillthrough — diukur tetap jauh lebih ringan daripada
   pipeline lama (1× hitung vs 2× cache + List.Generate + pivot M).
 
+## MENGAPA PERHITUNGAN METRIK TETAP DI QUERY (M), BUKAN 100% DI DATA MODEL?
+
+Pertanyaan: "filter JENIS untuk PIVOT HASIL SO, perhitungan Stock Seharusnya,
+dan perhitungan deviasi — kenapa tidak dipindah 100% ke Data Model biar
+lebih cepat?" Jawaban singkat: **sudah ada di garis pembagian optimal.**
+Kuncinya bukan "M vs DAX", tapi KAPAN angka dihitung:
+
+| Tempat | Kapan dihitung | Kecepatan interaksi pivot |
+|---|---|---|
+| Kolom hasil M (sekarang) | 1× saat Refresh | Storage engine murni — tercepat yang mungkin |
+| DAX calculated column | 1× saat Refresh (formula engine, baris-per-baris) | Sama cepatnya — **tidak ada yang bertambah cepat** |
+| DAX measure | TIAP klik/slice/filter | Hanya menang jika nilai bergantung konteks filter |
+
+**Kenapa Stock Seharusnya + SO_KEMARIN + 5 metrik + Keterangan/Indikasi
+tetap di M:**
+1. Angkanya snapshot historis bulan berjalan — tidak berubah setelah
+   refresh → precompute 1× lalu simpan statis = optimal. Measure berarti
+   membayar hitung ulang berkali-kali untuk hasil yang identik.
+2. SO_KEMARIN = chaining antar-baris (hari N memakai SO hari N-1 per item).
+   Di M: `Table.Group` + List, single-pass, sudah di-buffer (1× evaluasi).
+   Di DAX calculated column: context transition × 15.810 baris — tidak lebih
+   cepat, cuma pindah tempat hitung, dan rumus jadi sulit di-debug
+   (PQ punya preview per-step, DAX calc column tidak).
+3. **Syarat keras drillthrough (permintaan migrasi v2):** double-click pivot
+   CEK DEVIASI harus menampilkan 18 kolom KATEGORI..Indikasi persis sampel.
+   Show Details HANYA menampilkan kolom fisik — measure tidak pernah muncul.
+   Jadi semua metrik WAJIB kolom material, di M atau calc column; keduanya
+   sama-sama dihitung saat refresh, maka dipilih yang mudah dibaca = M.
+4. Keterangan/Indikasi = nested IF teks → di DAX jadi `SWITCH` panjang yang
+   sulit dirawat.
+
+**Kenapa filter JENIS untuk PIVOT HASIL SO tetap di M (tabel F_HasilSO):**
+- Measure TIDAK BISA mengubah domain BARIS pivot (baris pivot = nilai kolom
+  tabel). Domain PIVOT HASIL SO = item berkode (join RFC_Kode) + JENIS="SO" —
+  dan domainnya berbeda dari F_Deviasi (ada GORENG MEKAR, tanpa KUAH
+  BAKSO) → wajib jadi tabel material tersendiri → M (bahasa ETL) adalah
+  tempat yang benar. Calculated table DAX bisa teknis, tapi berarti
+  menulis ulang join dalam DAX: lebih lambat, lebih sulit dibaca, nol untung.
+
+**Yang memang pindah ke model: hanya [Akumulasi]** — running total
+bergantung konteks (kolom pivot = hari berjalan). Di M ia butuh
+`List.Generate` sekuensial (terberat, sudah dihapus); di DAX cukup 1 measure
+dengan cache storage engine. Inilah garis bagi yang benar:
+**kontekstual → measure DAX; statis → materialisasi di M.**
+
+**"100% ke model" mustahil secara struktur:** Data Model hanya menerima
+tabel jadi. Gabungan 8 sumber, unpivot hari 1..31, konversi satuan ke gr,
+join LINK pecahan→induk, label JENIS, filter KUAH BAKSO — semua operasi
+bentuk/ETL yang tidak ada padanannya di DAX. Yang bisa "dipindahkan" hanya
+lapisan metrik terakhir, dan di lapisan itu materialisasi M = interaksi
+tercepat yang mungkin (Sum of kolom statis = nol formula engine).
+
+Skala data (±16 ribu baris) membuat refresh didominasi overhead per-koneksi
+Excel (44 query), bukan volume — memindahkan metrik ke DAX tidak mengubah
+waktu refresh yang terasa. Kapan jawaban ini berubah? Jika data tumbuh ke
+ratusan ribu/juta baris atau multi-outlet: saatnya keluar dari Excel
+(database + semantic layer), bukan memindahkan beban ke DAX.
+
 ## JIKA MINTA ANGKA PERSIS LAMA (mode legacy)
 
 Angka lama hari-1 untuk 9 item itu berasal dari bug (SO_KEMARIN=0 padahal stok awal ada
