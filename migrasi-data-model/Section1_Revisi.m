@@ -505,12 +505,35 @@ shared F_Deviasi = let
     // trial di fnBreakdownUnified) -> SO_KEMARIN hari-1 = STOCK AWAL,
     // bukan 0 (bug lama pada 9 item terbetulkan - lihat
     // LAPORAN-VALIDASI.md).
-    // Catatan desain: 5 metrik + Keterangan + Indikasi melekat
+    // Catatan desain: metrik + Keterangan + Indikasi melekat
     // sebagai KOLOM baris (syarat agar muncul saat double-click pivot
     // Data Model / drillthrough). Konsekuensi: pivot CEK DEVIASI
     // HARIAN TIDAK lagi butuh measure (persis pivot sampel: JENIS di
     // Rows, Attribute di Columns, Sum of Value di Values), dan
     // running total AKUMULASI cukup 1 measure DAX [Akumulasi].
+    //
+    // v7 — 6.PEMAKAIAN (COM) MUNCUL DI JENIS CEK DEVIASI HARIAN:
+    // 1) JENIS kini memuat 6 metrik: 1.DEVIASI..5.LOSS/SURPLUS plus
+    //    baris hitung "6.PEMAKAIAN (COM)" — replika rumus query
+    //    produksi: COM = (hari-1 ? STOK AWAL : SO kemarin) + BARANG
+    //    MASUK - BARANG KELUAR - SO hari ini, dirantai per item urut
+    //    hari (pola & semantik PERSIS rantai SO_KEMARIN yang sudah
+    //    tervalidasi). Skema TETAP 18 KOLOM — COM adalah NILAI JENIS
+    //    (baris baru hasil Table.Unpivot), BUKAN kolom baru, jadi
+    //    double-click drillthrough tetap menampilkan 18 kolom persis
+    //    sampel. Total baris 15.810 -> 18.972 (+3.162 baris COM =
+    //    102 item x 31 hari). Identitas aljabar utk validasi:
+    //    COM = BOM - 1.DEVIASI (dicek otomatis ke angka asli cache1
+    //    di so-surgery/updates/validate_fdeviasi.py).
+    // 2) 5 metrik + COM dihitung SEKALI di dalam Table.Group sebagai
+    //    list per grup (single-pass) — menggantikan 5 Table.AddColumn
+    //    full-scan + GetVal record-lookup per baris. Angka identik.
+    // 3) Sort rantai: key kolom langsung {Attribute} — Attribute sudah
+    //    Int64 (di-typed upstream, null sudah difilter); key cast
+    //    per-baris lama = dead weight, dihapus.
+    // Pivot CEK DEVIASI HARIAN: COM otomatis muncul sebagai baris
+    // JENIS (Rows: KATEGORI > NAMA BARANG > JENIS > SATUAN); pivot
+    // AKUMULASI: [Akumulasi] otomatis meng-akumulasi COM.
     // Query lama yang digantikan: "RFC_Rekap Mentah [CEK DEVIASI]
     // Raw" + "RFC_Rekap Mentah [CEK DEVIASI] Akumulasi" + Raw
     // Rekap Mentah [FINAL] PIVOT HASIL SO -> F_Deviasi / F_HasilSO.
@@ -549,6 +572,12 @@ shared F_Deviasi = let
         in
             if v = null then 0 else v,
 
+    // 🔥 OPTIMASI v7 SINGLE-PASS PENUH: 5 metrik + COM dihitung di
+    // dalam Table.Group sebagai LIST per grup (±31 elemen), bukan
+    // 5 Table.AddColumn full-scan berantai + GetVal record-lookup
+    // per baris. Semua list dasar sudah null-safe (GetListSafe),
+    // jadi nilai identik dengan versi kolom-per-kolom — tervalidasi
+    // otomatis vs cache1 (15.810 baris metrik lama + identitas COM).
     #"Stok Seharusnya" =
         let
             Grouped = Table.Group(
@@ -559,10 +588,10 @@ shared F_Deviasi = let
                         "Data",
                         (t) =>
                             let
-                                SortedT = Table.Sort(
-                                    t,
-                                    each try Number.From([Attribute]) otherwise [Attribute]
-                                ),
+                                // v7: Attribute sudah Int64 (di-typed di Raw Rekap
+                                // Mentah; null sudah difilter) -> sort key kolom
+                                // langsung, tanpa cast per baris.
+                                SortedT = Table.Sort(t, {{"Attribute", Order.Ascending}}),
                                 BufferedT = Table.Buffer(SortedT),
                                 RowCount = Table.RowCount(BufferedT),
 
@@ -576,6 +605,9 @@ shared F_Deviasi = let
                                 MasukList = GetListSafe("BARANG MASUK"),
                                 KeluarList = GetListSafe("BARANG KELUAR"),
                                 BOMList = GetListSafe("BOM"),
+                                WasteList = GetListSafe("WASTE"),
+                                SusutList = GetListSafe("SUSUT"),
+                                TrialList = GetListSafe("TRIAL"),
 
                                 StockAwal1 = if List.IsEmpty(AwalList) then 0 else AwalList{0},
                                 SOKemarinList = List.FirstN({StockAwal1} & SOList, RowCount),
@@ -585,9 +617,36 @@ shared F_Deviasi = let
                                     each SOKemarinList{_} + MasukList{_} - KeluarList{_} - BOMList{_}
                                 ),
 
+                                // v7: 6.PEMAKAIAN (COM) — rumus query produksi:
+                                //   (i=0 ? STOK AWAL : SO kemarin) + BM - BK - SO.
+                                // Rantai & semantik PERSIS SOKemarinList; identitas
+                                // aljabar: COM = BOM - 1.DEVIASI.
+                                ComList = List.Transform(
+                                    List.Numbers(0, RowCount),
+                                    each SOKemarinList{_} + MasukList{_} - KeluarList{_} - SOList{_}
+                                ),
+
+                                DevList = List.Transform(
+                                    List.Numbers(0, RowCount),
+                                    each SOList{_} - StokList{_}
+                                ),
+                                WasteNegList = List.Transform(WasteList, each - Number.Abs(_)),
+                                SusutNegList = List.Transform(SusutList, each - Number.Abs(_)),
+                                TrialNegList = List.Transform(TrialList, each - Number.Abs(_)),
+                                LossList = List.Transform(
+                                    List.Numbers(0, RowCount),
+                                    each DevList{_} - WasteNegList{_} - SusutNegList{_} - TrialNegList{_}
+                                ),
+
                                 Output = Table.FromColumns(
-                                    Table.ToColumns(BufferedT) & {SOKemarinList, StokList},
-                                    Table.ColumnNames(BufferedT) & {"SO_KEMARIN", "STOK_SEHARUSNYA"}
+                                    Table.ToColumns(BufferedT)
+                                        & {SOKemarinList, StokList,
+                                           DevList, WasteNegList, SusutNegList, TrialNegList, LossList,
+                                           ComList},
+                                    Table.ColumnNames(BufferedT)
+                                        & {"SO_KEMARIN", "STOK_SEHARUSNYA",
+                                           "1.DEVIASI", "2.WASTE", "3.SUSUT", "4.TRIAL", "5.LOSS/SURPLUS",
+                                           "6.PEMAKAIAN (COM)"}
                                 )
                             in
                                 Output
@@ -599,45 +658,9 @@ shared F_Deviasi = let
         in
             Result,
 
-    #"Added 1.Deviasi" =
-        Table.AddColumn(
-            #"Stok Seharusnya",
-            "1.DEVIASI",
-            each GetVal(_, "SO") - [STOK_SEHARUSNYA],
-            type number
-        ),
-
-    #"Added 2.Waste" =
-        Table.AddColumn(
-            #"Added 1.Deviasi",
-            "2.WASTE",
-            each - Number.Abs(GetVal(_, "WASTE")),
-            type number
-        ),
-    #"Added 3.Susut" =
-        Table.AddColumn(
-            #"Added 2.Waste",
-            "3.SUSUT",
-            each - Number.Abs(GetVal(_, "SUSUT")),
-            type number
-        ),
-    #"Added 4.Trial" =
-        Table.AddColumn(
-            #"Added 3.Susut",
-            "4.TRIAL",
-            each - Number.Abs(GetVal(_, "TRIAL")),
-            type number
-        ),
-    #"Added 5.Loss/Surplus" =
-        Table.AddColumn(
-            #"Added 4.Trial",
-            "5.LOSS/SURPLUS",
-            each [1.DEVIASI] - [2.WASTE] - [3.SUSUT] - [4.TRIAL],
-            type number
-        ),
     #"Renamed Columns" =
         Table.RenameColumns(
-            #"Added 5.Loss/Surplus",
+            #"Stok Seharusnya",
             {
                 {"STOK_SEHARUSNYA", "Stock Seharusnya (SO_Kemarin + Barang Masuk - Barang Keluar - BOM)"}
             },
@@ -645,9 +668,11 @@ shared F_Deviasi = let
         ),
     #"Replaced Value1" = Table.ReplaceValue(#"Renamed Columns", null, 0, Replacer.ReplaceValue, {"5.LOSS/SURPLUS"}),
 
+    // 6 label metrik (v7: + 6.PEMAKAIAN (COM)) -> Table.Unpivot
+    // menjadi baris JENIS; COM = baris baru, skema 18 kolom tetap.
     MetricCols = List.Select(
         Table.ColumnNames(#"Replaced Value1"),
-        each List.Contains({"1.DEVIASI", "2.WASTE", "3.SUSUT", "4.TRIAL", "5.LOSS/SURPLUS"}, _)
+        each List.Contains({"1.DEVIASI", "2.WASTE", "3.SUSUT", "4.TRIAL", "5.LOSS/SURPLUS", "6.PEMAKAIAN (COM)"}, _)
     ),
 
     #"Unpivoted Columns" = Table.Unpivot(#"Replaced Value1", MetricCols, "JENIS", "Value"),
@@ -941,6 +966,9 @@ shared Metric = let
     // pivot CEK DEVIASI & AKUMULASI. JANGAN dibuat relasi ke tabel
     // lain di Power Pivot. Load: Only Create Connection + Add to
     // Data Model.
+    // v7: 5 -> 6 nilai (menambah "6.PEMAKAIAN (COM)") agar slicer/
+    // baris Metric sinkron dengan nilai F_Deviasi[JENIS]. Query ini
+    // OPSIONAL — pivot modern memakai F_Deviasi[JENIS] langsung.
     // =============================================================
     Source = #table(
         type table [Metric = text],
@@ -949,7 +977,8 @@ shared Metric = let
             {"2.WASTE"},
             {"3.SUSUT"},
             {"4.TRIAL"},
-            {"5.LOSS/SURPLUS"}
+            {"5.LOSS/SURPLUS"},
+            {"6.PEMAKAIAN (COM)"}
         }
     )
 in

@@ -1,7 +1,27 @@
 # PANDUAN MIGRASI — Perhitungan Berat ke Data Model
 ## Laporan Stock Opname (Full Power Query → Power Query + DAX)
 
-> **📦 STATUS FILE (UPDATE v6 — PIVOT HASIL SO: + PERHITUNGAN COM):**
+> **📦 STATUS FILE (UPDATE v7 — CEK DEVIASI HARIAN: + `6.PEMAKAIAN (COM)` + AUDIT PERFORMA):**
+> file xlsx di repo ini SUDAH DIREVISI LANGSUNG. Pembaruan v7:
+> `F_Deviasi` kini memuat baris hitung **`6.PEMAKAIAN (COM)`** sebagai
+> **nilai `JENIS`** di pivot **CEK DEVIASI HARIAN & AKUMULASI** — rumus
+> produksi: *pemakaian = (SO kemarin | STOK AWAL utk hari-1) + Barang
+> Masuk − Barang Keluar − SO hari ini*, dirantai per item urut hari
+> (pola rantai `SO_KEMARIN`). **Skema tabel tetap 18 kolom** (COM =
+> baris baru lewat unpivot, BUKAN kolom baru) → double-click tetap
+> menampilkan 18 kolom persis sampel; total baris 15.810 → 18.972
+> (+3.162 = 102 item × 31 hari). Bonus deep-audit performa: 5 metrik +
+> COM kini **single-pass di `Table.Group`** (menggantikan 5
+> `Table.AddColumn` full-scan) + sort rantai tanpa cast per baris —
+> lihat seksi **"AUDIT PERFORMA v7"** di bawah. Validasi v7: 15.810
+> baris metrik lama **tetap 15.765 persis + 45 known-fix**; identitas
+> **COM = BOM − 1.DEVIASI** dicek langsung ke angka asli cache1:
+> **3.153 persis + 9 known-fix hari-1, 0 anomali**; struktur workbook
+> **65/65 LULUS** (`so-surgery/updates/validate_fdeviasi.py`). Tabel
+> `Metric` (opsional) ikut jadi 6 nilai. Sudah termigrasi v1–v6?
+> Ikuti "UPGRADE" Sub-A (paste ulang `F_Deviasi` + `Metric`, ± 3 menit).
+>
+> **📦 (UPDATE v6 — PIVOT HASIL SO: + PERHITUNGAN COM):**
 > file xlsx di repo ini SUDAH DIREVISI LANGSUNG.
 > Pembaruan v6: `F_HasilSO` kini juga MEMBUAT baris hitung
 > **`6.PEMAKAIAN (COM)`** — replika rumus query produksi:
@@ -65,6 +85,7 @@
 > Section1.m byte-exact, blob QueryGroups 6 grup, 44/44 query ber-grup).
 >
 > **Status validasi angka: LULUS 100%** — 15.765/15.810 baris CEK DEVIASI,
+> **+ 3.162 baris COM baru di CEK DEVIASI (v7: 3.153 persis + 9 known-fix)**,
 > 15.252/15.810 AKUMULASI, 1.199/1.199 PIVOT HASIL SO (v5: 37.169 sel nilai
 > persis, semua 8 JENIS), dan seluruh teks
 > Keterangan/Indikasi cocok persis dengan cache pivot lama. Sisa selisih =
@@ -76,7 +97,8 @@
 > single-pass (kecepatan, angka identik) · v4 panel query 6 folder bernomor ·
 > v5 `F_HasilSO` semua 8 JENIS + kolom JENIS (paritas dropdown "JENIS") ·
 > **v6 `F_HasilSO` + baris hitung `6.PEMAKAIAN (COM)` (rumus produksi,
-> tervalidasi vs cache lama)**.
+> tervalidasi vs cache lama)** · **v7 `F_Deviasi` + `6.PEMAKAIAN (COM)`
+> di JENIS CEK DEVIASI (single-pass metrik + audit performa)**.
 > Sudah termigrasi pakai panduan v1–v4? Tidak perlu download ulang — cukup ikuti
 > bagian "UPGRADE FILE YANG SUDAH TERMIGRASI (± 10 MENIT)".
 
@@ -89,9 +111,9 @@
 | 1 | `RFC_Rekap Mentah [CEK DEVIASI] Raw` | ❌ HAPUS (diganti `F_Deviasi` 18 kolom) |
 | 2 | `RFC_Rekap Mentah [CEK DEVIASI] Akumulasi` | ❌ HAPUS (running total = 1 measure DAX) |
 | 3 | `Raw Rekap Mentah [FINAL] PIVOT HASIL SO` | ❌ HAPUS (diganti `F_HasilSO`) |
-| 4 | `F_Deviasi` | ➕ BARU — fakta 18 kolom (CEK DEVIASI & AKUMULASI, drillthrough = sampel) |
+| 4 | `F_Deviasi` | ➕ BARU — fakta 18 kolom (CEK DEVIASI & AKUMULASI, drillthrough = sampel) **+ baris hitung `6.PEMAKAIAN (COM)` di JENIS (v7)** |
 | 5 | `F_HasilSO` | ➕ BARU — fakta PIVOT HASIL SO: **semua 8 JENIS + kolom `JENIS` + baris hitung `6.PEMAKAIAN (COM)` (v6)**; filter jenis ada **di pivot** (FILTERS, default SO) — persis sampel (v5) |
-| 6 | `Metric` | ➕ BARU — dimensi 5 metrik (kini **opsional** — `F_Deviasi[JENIS]` sudah memuat label metrik) |
+| 6 | `Metric` | ➕ BARU — dimensi **5→6 metrik** (kini **opsional** — `F_Deviasi[JENIS]` sudah memuat label metrik) |
 | 7 | `Raw Rekap Mentah` | ⚪ TETAP connection-only (tidak ke model) |
 | 8 | `RFC_Kode Barang` | ⚪ TETAP connection-only (dipakai `F_HasilSO`) |
 | 9 | `Raw Rekap Mentah [FINAL]` | ⚪ TETAP load ke sheet REKAP MENTAH |
@@ -196,8 +218,9 @@ RETURN
 ```
 
 > Pivot **CEK DEVIASI HARIAN tidak butuh measure sama sekali** — semua nilai
-> (5 metrik) sudah jadi kolom `Value` per baris metrik, sama seperti pivot sampel.
-> Measure generasi-1 lama (20 measure) tidak diperlukan lagi — lihat catatan di
+> (6 metrik: 5 lama + `6.PEMAKAIAN (COM)` v7) sudah jadi kolom `Value` per
+> baris metrik, sama seperti pivot sampel. Measure generasi-1 lama (20
+> measure) tidak diperlukan lagi — lihat catatan di
 > `DAX-Measures.dax` bagian 3.
 
 ## LANGKAH 5 — Bangun 3 pivot baru dari Data Model (± 5 menit)
@@ -209,9 +232,15 @@ Untuk tiap sheet: buka sheet lama, hapus isi area pivot lama, lalu
 - ROWS:    `F_Deviasi[KATEGORI]` → `F_Deviasi[NAMA BARANG]` → `F_Deviasi[JENIS]` → `F_Deviasi[SATUAN]`
 - COLUMNS: `F_Deviasi[Attribute]`  (angka 1..31, terurut numerik otomatis)
 - VALUES:  `F_Deviasi[Value]` (Sum of Value)
+- Baris `JENIS` kini **6 metrik** (v7): `1.DEVIASI`, `2.WASTE`, `3.SUSUT`,
+  `4.TRIAL`, `5.LOSS/SURPLUS`, **`6.PEMAKAIAN (COM)`** — pemakaian harian
+  = SO kemarin + BM − BK − SO (hari-1 pakai STOK AWAL). COM muncul
+  otomatis di bawah tiap item. Tidak mau melihatnya? Filter/slicer `JENIS`
+  tinggal dipersempit.
 - ✅ **DOUBLE-CLICK sel nilai apa pun** → sheet detail muncul dengan **18 kolom
   persis file sampel** (baris = item × hari × metrik). Ini perilaku drillthrough
   bawaan pivot Data Model: kolom yang ditampilkan = kolom tabel sesuai urutannya.
+  *(COM = baris baru, bukan kolom — 18 kolom tidak bertambah.)*
 
 **AKUMULASI** (baru):
 - ROWS / COLUMNS: sama dengan di atas
@@ -242,6 +271,11 @@ Untuk tiap sheet: buka sheet lama, hapus isi area pivot lama, lalu
      `RICE WRAP` hari 1 = **1.500** (stok awal 1.500, SO/BM/BK = 0);
      `SENDOK TEH SUNDAE (V.030)` hari 1 = **872** (15.540 stok awal + BM −
      BK − SO, identik BOM − 1.DEVIASI = 904 − 32).
+   - **CEK DEVIASI HARIAN (v7)**: buka baris item mana pun → di bawah
+     `5.LOSS/SURPLUS` kini ada baris **`6.PEMAKAIAN (COM)`**. Cek silang
+     contoh: `RICE WRAP` hari 1 = **1.500**; `SENDOK TEH SUNDAE (V.030)`
+     hari 1 = **872** — **sama persis dengan COM di PIVOT HASIL SO**
+     (domain item yang tumpang tindih; dua tabel, satu angka).
 3. **Tes double-click**: klik sel mana pun di CEK DEVIASI HARIAN (mis. satu item ×
    hari 5) → sheet detail menampilkan 18 kolom persis daftar di atas. Sel daun
    (item × hari × metrik) = 1 baris; subtotal item = ± 5–160 baris.
@@ -268,23 +302,25 @@ lewat Advanced Editor:
   hitung `6.PEMAKAIAN (COM)`). Bila file Anda sudah v5 dan hanya ingin
   menambah COM — tetap paste ulang Sub-B ini (satu blok yang sama).
 
-### Sub-A — Ganti `F_Deviasi` (lewati bila sudah v3+)
+### Sub-A — Ganti `F_Deviasi` (WAJIB utk v7: COM di CEK DEVIASI + single-pass)
 
-> Catatan v3: bila F_Deviasi Anda masih versi tanpa langkah
-> `#"Buffered Input" = Table.Buffer(#"Removed Columns")` sebelum
-> `Table.Pivot` — paste versi terbaru dari `Section1_Revisi.m` untuk
-> refresh single-pass (lebih cepat, angka tetap identik).
+> v7 mengganti isi `F_Deviasi` (baris hitung `6.PEMAKAIAN (COM)` di JENIS
+> + single-pass metrik) DAN menambah 1 nilai di query `Metric`. Bila file
+> Anda masih v1–v6 dan ingin COM tampil di CEK DEVIASI HARIAN, jalankan
+> keduanya. Salinan siap-tempel: `so-surgery/updates/new_fdeviasi.m`.
 
 1. **Data → Queries & Connections** → klik kanan **`F_Deviasi`** → **Edit…**
    (Power Query Editor terbuka).
 2. **Home → Advanced Editor** → select semua kode → **paste kode `F_Deviasi`
    baru** (blok `let … in Typed;` dari `Section1_Revisi.m`, mulai dari `let`
    sampai `in\n    Typed` — tanpa baris `shared F_Deviasi =` dan `;` penutup) → **OK**.
-   → Preview harus tampil 18 kolom. → **Home → Close & Load** (tujuan load
-   "connection + Data Model" tidak berubah).
-3. **Data → Refresh All** (2×). Tabel `F_Deviasi` di model otomatis dapat
-   kolom-kolom baru; kolom lama (`KATEGORI`, `NAMA BARANG`, `JENIS`, `SATUAN`,
-   `Attribute`, `Value`) tetap — tidak ada yang putus.
+   → Preview tetap **18 kolom**, jumlah baris bertambah (6 metrik per item-hari).
+   → **Home → Close & Load** (tujuan load "connection + Data Model" tidak berubah).
+3. Klik kanan **`Metric`** → **Edit… → Advanced Editor** → paste ulang blok
+   `Metric` (kini 6 nilai) — *hanya jika* Anda memakai tabel `Metric` sebagai
+   slicer/baris pivot (opsional; pivot modern memakai `F_Deviasi[JENIS]`).
+4. **Data → Refresh All** (2×). Tabel `F_Deviasi` di model otomatis dapat
+   baris COM; kolomnya (18) tidak berubah — pivot lama tidak putus.
 
 ### Sub-B — Ganti `F_HasilSO` (v6 — paritas filter "JENIS" + baris hitung COM)
 
@@ -343,6 +379,7 @@ lewat Advanced Editor:
 | 7 | Double-click AKUMULASI | 18 kolom + kolom `AKUMULASI` | 18 kolom (kolom `Value` = nilai harian, bukan running total; angka running total tetap benar di sel pivot via measure) |
 | 8 | Baris detail | termasuk 70 baris `(blank)` bug | tanpa baris null (bersih) |
 | 9 | Metrik COM di PIVOT HASIL SO | tidak ada di file sampel (hanya di file produksi user) | **BARU (v6)**: nilai JENIS `6.PEMAKAIAN (COM)` — pilih di FILTERS/Slicer `F_HasilSO[JENIS]`; COM = SO kemarin + BM − BK − SO (hari-1 = STOK AWAL); identitas cek: COM = BOM − 1.DEVIASI |
+| 10 | Metrik COM di CEK DEVIASI & AKUMULASI | tidak ada di file sampel (hanya di file produksi user) | **BARU (v7)**: baris `JENIS = "6.PEMAKAIAN (COM)"` di `F_Deviasi` — muncul otomatis di pivot CEK DEVIASI HARIAN; `[Akumulasi]` ikut meng-akumulasi COM. Baris detail 15.810 → 18.972; **18 kolom drillthrough tidak berubah** (COM = baris, bukan kolom) |
 
 ## PANEN OPTIMASI
 
@@ -352,8 +389,11 @@ lewat Advanced Editor:
 - ❌ Hilang: refresh ulang penuh tiap ganti slice/filter
 - ✅ Double-click CEK DEVIASI HARIAN = **18 kolom persis sampel** (v2)
 - ✅ Pivot CEK DEVIASI HARIAN tanpa measure (Sum of Value, seperti sampel)
+- ✅ v7: 6 metrik + COM **single-pass di `Table.Group`** — hapus 5
+  `Table.AddColumn` full-scan + cast sort per baris (angka identik; COM
+  nol biaya tambahan — memakai list yang sudah dievaluasi)
 - ⚠️ Kembali ada: `Table.Group` custom per item di `F_Deviasi` (pembentuk
-  SO_KEMARIN/Stock Seharusnya/5 metrik). Ini konsekuensi sadar agar 18 kolom
+  SO_KEMARIN/Stock Seharusnya/6 metrik). Ini konsekuensi sadar agar 18 kolom
   melekat di baris untuk drillthrough — diukur tetap jauh lebih ringan daripada
   pipeline lama (1× hitung vs 2× cache + List.Generate + pivot M).
 
@@ -408,6 +448,13 @@ tetap di M:**
   pemilihannya tetap storage engine murni. Cek silang otomatis ke angka
   asli cache lama lewat identitas COM = BOM − 1.DEVIASI: 3.091 cocok
   persis + 9 known-fix hari-1 (LAPORAN-VALIDASI Lampiran 6).
+- **COM di `F_Deviasi` (v7) — jalur yang sama persis:** rantai antar-baris
+  → materialisasi M di dalam `Table.Group` yang sama dengan SO_KEMARIN
+  (nol evaluasi tambahan); tampil sebagai **nilai `JENIS`** (bukan kolom)
+  sehingga kunci 18 kolom drillthrough tetap utuh dan pemilihan COM di
+  pivot tetap storage engine murni. Cek silang otomatis ke angka asli
+  cache1 lewat identitas COM = BOM − 1.DEVIASI: 3.153 persis + 9
+  known-fix hari-1 (LAPORAN-VALIDASI Lampiran 7).
 
 **Yang memang pindah ke model: hanya [Akumulasi]** — running total
 bergantung konteks (kolom pivot = hari berjalan). Di M ia butuh
@@ -427,6 +474,84 @@ Excel (44 query), bukan volume — memindahkan metrik ke DAX tidak mengubah
 waktu refresh yang terasa. Kapan jawaban ini berubah? Jika data tumbuh ke
 ratusan ribu/juta baris atau multi-outlet: saatnya keluar dari Excel
 (database + semantic layer), bukan memindahkan beban ke DAX.
+
+## AUDIT PERFORMA v7 — APAKAH INI SUDUH VERSI PALING CEPAT?
+
+Pertanyaan: *"dan ini apakah sudah versi paling cepat? deep audit."* Audit
+dilakukan ke SELURUH rantai M (44 query) + lapisan pivot Data Model.
+Kesimpulan singkat: **ya — setelah v7 tidak ada lagi pekerjaan berat yang
+bisa dihapus dari refresh tanpa mengorbankan fitur; sisa waktunya adalah
+overhead per-koneksi Excel yang tidak bisa dihilangkan dari dalam M.**
+
+### A. Dua lapis kecepatan (jangan dicampur)
+
+| Lapis | Apa yang dihitung | Status |
+|---|---|---|
+| REFRESH (M) | Gabungan 8 sumber → konversi satuan → join → pivot JENIS → rantai SO_KEMARIN → 6 metrik → unpivot. Berat, tapi hanya **1× per refresh** | Materialisasi penuh (v3 + v7 single-pass) |
+| INTERAKSI pivot | Sum of Value / filter JENIS / drillthrough / [Akumulasi] | Semua nilai = kolom fisik → **storage engine murni**; hanya [Akumulasi] yang memakai formula engine (memang kontekstual) |
+
+### B. Temuan audit & perbaikan v7 (satu-satunya sisa yang bisa dioptimalkan)
+
+1. **6 metrik kini single-pass di `Table.Group`** — sebelumnya 5
+   `Table.AddColumn` berantai, masing-masing memindai ulang tabel wide
+   (3.162 baris) + `GetVal` record-lookup per baris (≈ 25 ribu lookup per
+   refresh). Kini 8 `List.Transform` atas list ±31 elemen per item, di
+   dalam grup yang SUDAH mengevaluasi `SOKemarinList`/`StokList` —
+   **nol pemindaian tambahan**. Angka terbukti identik (divalidasi
+   otomatis vs cache1).
+2. **COM = nol biaya tambahan** — `ComList` memakai `SOKemarinList`,
+   `MasukList`, `KeluarList`, `SOList` yang sudah dievaluasi untuk Stock
+   Seharusnya; biaya = 1 `List.Transform` per item (±31 elemen × 102 item).
+3. **Sort rantai tanpa cast per baris** — key lama
+   `each try … otherwise …` per baris = dead weight (Attribute sudah
+   Int64 sejak `Raw Rekap Mentah`; null sudah difilter sebelumnya).
+   Kini `{{"Attribute", Order.Ascending}}` — identik dengan rantai COM
+   `F_HasilSO`.
+4. **Inventaris buffer — semua titik multi-enumerasi tertutup**: hub
+   `SRC_AllSources` (7 tabel master; field record lazy + memoized),
+   `IPT_Waste BnP` (unpivot dipakai 3 cabang), `fnProcessLinkLookup` /
+   `fnProcessSOHarian` (unpivot dipakai 2 cabang), `Raw Rekap Mentah`
+   (ujung pipeline), `Raw Rekap Mentah [FINAL]` (pra-pivot hari),
+   `F_Deviasi` (pra-pivot JENIS + per-grup), `F_HasilSO` (`Base`
+   pra-rantai + per-grup). Tidak tersisa enumerasi ganda tanpa buffer.
+5. **Filter sebelum join** sudah diterapkan (KUAH BAKSO sebelum join
+   Kategori — fix P0-4; domain `F_HasilSO` difilter KODE≠null sebelum
+   rantai COM). Semua join = `Table.NestedJoin` + Expand pada kunci
+   teks kecil (master ±502 baris) — bukan faktor waktu.
+
+### C. Yang TIDAK bisa lebih cepat lagi (struktur, bukan M)
+
+| Kandidat "optimasi" | Kenapa ditolak |
+|---|---|
+| Pindahkan metrik ke DAX calculated column | Dihitung saat refresh juga (formula engine, per baris) — tidak lebih cepat, cuma pindah tempat; drillthrough 18 kolom tetap wajib kolom fisik |
+| Hapus `Table.Group` rantai | SO_KEMARIN/COM = perhitungan **antar-baris** (hari N pakai hari N−1) — tidak ada padanan yang lebih murah; sudah single-pass |
+| Hapus buffer | Buffer = jaminan 1× evaluasi; tanpa itu, lazy M mengevaluasi ulang gabungan 8 sumber tiap kali list/pivot mengenumerasi |
+| Gabung `F_Deviasi` + `F_HasilSO` jadi 1 tabel | Domain berbeda (Cek Deviasi: non-MENU-MIX, semua kategori; Hasil SO: item berkode + GORENG MEKAR/MENU MIX) — 2 fakta memang 2 tabel; rantai COM memang dihitung terpisah di 2 domain |
+| `[Akumulasi]` dibuat "lebih pintar" | Rumus sudah minimal & kompatibel Excel 2016; mayoritas kerja ditangani storage engine |
+
+### D. Ke mana waktu refresh sebenarnya pergi
+
+- **44 koneksi PQ** — tiap koneksi punya biaya tetap (baca sheet, bangun
+  mashup, verifikasi). Ini penghuni terbesar waktu refresh, dan ke-44
+  query terbukti dipakai (audit dependency v4) — tidak bisa dihapus.
+- **Volume data sendiri kecil** (±16 ribu baris long; `F_Deviasi`
+  18.972 baris) — semua operasi list/group selesai dalam hitungan
+  milidetik.
+- `Raw Rekap Mentah` dipakai 3 tabel sekaligus (`F_Deviasi`, `F_HasilSO`,
+  `[FINAL]`) — dalam satu sesi Refresh All, engine modern mengevaluasi
+  query bersama satu kali; kalaupun engine tidak meng-cache, `Table.Buffer`
+  di ujung `Raw Rekap Mentah` tetap menjamin evaluasi tunggal per
+  pemakaian. Ini perilaku engine — bukan sesuatu yang bisa (atau perlu)
+  ditulis ulang di M.
+
+### E. Kesimpulan audit
+
+**v7 = batas atas arsitektur Excel** untuk laporan ini: materialisasi 1×
+per refresh, interaksi pivot 100% storage engine (plus 1 measure
+kontekstual), rantai antar-baris single-pass, seluruh titik enumerasi
+ganda ter-buffer, COM tanpa biaya tambahan. Jika data tumbuh ke ratusan
+ribu baris atau multi-outlet, pengunci berikutnya bukan M lagi — saatnya
+pindah platform (database + semantic layer), bukan memindahkan beban ke DAX.
 
 ## JIKA MINTA ANGKA PERSIS LAMA (mode legacy)
 

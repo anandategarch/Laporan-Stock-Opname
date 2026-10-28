@@ -4,8 +4,8 @@
 // UPDATE (double-click parity): F_Deviasi kini ber-skema 18 KOLOM —
 // replika persis output query lama "RFC_Rekap Mentah [CEK DEVIASI] Raw"
 // (SO_KEMARIN, WASTE, TRIAL, SUSUT, STOCK AWAL, BARANG MASUK, BARANG
-// KELUAR, BOM, Stock Seharusnya, SO, 5 metrik, Keterangan, Indikasi
-// semuanya KOLOM tabel). Akibatnya kebutuhan measure menyusut drastis:
+// KELUAR, BOM, Stock Seharusnya, SO, 6 metrik (5 + COM v7), Keterangan,
+// Indikasi semuanya KOLOM tabel). Akibatnya kebutuhan measure menyusut drastis:
 //
 //   - Pivot CEK DEVIASI HARIAN : TIDAK PERLU MEASURE APA PUN.
 //     ROWS    : F_Deviasi[KATEGORI] > [NAMA BARANG] > [JENIS] > [SATUAN]
@@ -13,6 +13,12 @@
 //     VALUES  : F_Deviasi[Value]  (Sum of Value — persis pivot sampel)
 //     DOUBLE-CLICK sel nilai -> sheet detail 18 kolom, sama seperti
 //     file sampel (urutan identik dgn pivot cache lama).
+//     v7: JENIS memuat 6 nilai — 1.DEVIASI, 2.WASTE, 3.SUSUT, 4.TRIAL,
+//     5.LOSS/SURPLUS, 6.PEMAKAIAN (COM) (baris hitung COM di F_Deviasi,
+//     rumus produksi: COM = SO kemarin + BM - BK - SO, hari-1 = STOK
+//     AWAL; identitas cek: COM = BOM - 1.DEVIASI). COM tampil otomatis
+//     sebagai baris di pivot CEK DEVIASI HARIAN, dan [Akumulasi] di
+//     bawah otomatis meng-akumulasi COM pada konteks baris COM.
 //
 //   - Pivot AKUMULASI          : cukup 1 measure [Akumulasi] di bawah.
 //

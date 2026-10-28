@@ -436,3 +436,68 @@ Pivot PIVOT HASIL SO: `F_HasilSO[JENIS]` di FILTERS → pilih
 **`6.PEMAKAIAN (COM)`** (di samping 8 jenis mentah). Nilai = pemakaian
 harian per item (kolom Attribute 1..31). Tanpa measure apa pun — tetap
 Sum of Value, storage engine murni.
+
+## LAMPIRAN 7 — v7: `6.PEMAKAIAN (COM)` DI JENIS F_DEVIASI + AUDIT PERFORMA
+
+Permintaan user: *"pemakaian com harusnya muncul di jenis pada cek
+deviasi harian. dan ini apakah sudah versi paling cepat? deep audit"*.
+
+### 7.1 Keputusan desain (amend §6.1)
+
+Lampiran 6 §6.1 menempatkan COM di `F_HasilSO` dan "BUKAN F_Deviasi"
+demi mengunci 18 kolom drillthrough. v7 merevisi dengan aman: yang
+dilarang adalah **KOLOM baru** (akan merusak urutan 18 kolom cache1);
+menambah COM sebagai **NILAI `JENIS`** (baris hasil `Table.Unpivot`)
+tidak menyentuh skema — itulah solusi yang diminta user.
+
+| Hal | Keputusan | Alasan |
+|---|---|---|
+| Lokasi | `F_Deviasi` — baris `JENIS = "6.PEMAKAIAN (COM)"` | COM tampil di pivot CEK DEVIASI HARIAN & AKUMULASI (JENIS di Rows); skema 18 kolom tetap terkunci persampel |
+| Rumus | COM = (i=0 ? STOK AWAL : SO kemarin) + BM − BK − SO | Identik query produksi & rantai COM F_HasilSO (v6); identitas: COM = BOM − 1.DEVIASI |
+| Keterangan/Indikasi | `"-"` | Sama seperti metrik 2–4 (bukan DEVIASI/LOSS) — konsisten cache1 |
+| Single-pass | 5 metrik + COM sebagai list di `Table.Group` | Ganti 5 `Table.AddColumn` full-scan; `ComList` memakai list yang sudah dievaluasi |
+| Sort rantai | `{{"Attribute", Order.Ascending}}` | Attribute Int64; key cast per-baris lama = dead weight |
+| Metric (tabel opsional) | 5 → 6 nilai | Sinkron nilai JENIS untuk slicer |
+| AKUMULASI | Tanpa perubahan measure | `[Akumulasi]` otomatis meng-akumulasi baris COM |
+
+### 7.2 Validasi v7 (`so-surgery/updates/validate_fdeviasi.py`, CEK 1–6)
+
+| Pemeriksaan | Hasil |
+|---|---|
+| CEK 1 urutan 18 kolom == cache1 | PASS |
+| CEK 2 domain: **18.972 baris** (15.810 + 3.162 COM), 0 null, JENIS 6 nilai | PASS |
+| CEK 3 nilai & teks metrik lama vs cache1 | **PASS — 15.765 persis + 45 known-fix, 0 anomali/extra** (tidak berubah dari v2/v3) |
+| **CEK 5 identitas COM = BOM − 1.DEVIASI vs angka asli cache1** | **PASS — 3.153 persis + 9 known-fix hari-1, 0 anomali/orphan**; 102 item × 31 hari, day-complete |
+| CEK 6 anchor M v7 (9 anchor: label COM, rantai ComList, MetricCols 6 label, AddColumn lama hilang, sort key kolom, buffer tetap, Metric 6 nilai, F_HasilSO identik HEAD, 44 query) | PASS 9/9 |
+| Struktur workbook (rebuild + `so-surgery/validate.py`) | **65/65 LULUS** |
+| Regresi `F_HasilSO` v6 (`validate_fhasilso.py` CEK A–E) | LULUS — 0 anomali (D-check kini stateless: blok F_HasilSO identik HEAD) |
+
+9 known-fix hari-1 COM = item bug lama yang sama dengan Lampiran 1/6
+(SO_KEMARIN lama = 0 padahal stok awal ada) — koreksi disengaja.
+Contoh silang: `RICE WRAP` hari-1 COM lama-implied 0 → baru **1.500**;
+`SENDOK TEH SUNDAE (V.030)` −14.668 → **872** (= 15.540 + BM − BK − SO;
+identik COM di F_HasilSO — dua tabel, satu angka).
+
+### 7.3 Hasil deep audit performa (ringkas)
+
+Audit seluruh 44 query M + lapisan pivot:
+
+1. **Satu-satunya sisa bottleneck M yang bisa diperbaiki** = 5
+   `Table.AddColumn` metrik berantai + sort cast per baris di
+   `F_Deviasi` → **diperbaiki v7** (single-pass list di `Table.Group`;
+   COM nol biaya tambahan — memakai `SOKemarinList`/`MasukList`/
+   `KeluarList`/`SOList` yang sudah dievaluasi untuk Stock Seharusnya).
+2. Semua titik multi-enumerasi sudah `Table.Buffer` (inventaris lengkap
+   di PANDUAN "AUDIT PERFORMA v7" §B.4) — tidak ada enumerasi ganda
+   tanpa buffer yang tersisa.
+3. Interaksi pivot = 100% storage engine (semua nilai kolom material);
+   satu-satunya measure `[Akumulasi]` memang kontekstual dan sudah minimal.
+4. Sisa waktu refresh didominasi overhead **44 koneksi Excel**, bukan
+   volume (±16 rb baris; `F_Deviasi` 18.972 baris) — bukan kendali M.
+5. Yang tidak mungkin lebih cepat di Excel: pindah metrik ke calc column
+   DAX (sama-sama dihitung saat refresh), hapus `Table.Group` rantai
+   (antar-baris), gabung `F_Deviasi`+`F_HasilSO` (domain berbeda).
+
+**Kesimpulan: v7 = batas atas arsitektur Excel.** Angka identik, fitur
+bertambah (COM di Cek Deviasi Harian), refresh lebih ringan dari v6.
+Narasi lengkap: PANDUAN-MIGRASI seksi "AUDIT PERFORMA v7".
